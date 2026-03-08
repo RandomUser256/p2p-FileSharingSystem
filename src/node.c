@@ -49,6 +49,8 @@ typedef struct Node {
     int id;
     char Ip[MAX_IP_LENGTH];
     struct Node* succesor;
+    struct Node* predecessor;
+
     char fileContentPath[MAX_FILE_PATH_LENGTH];  
 
     //Finger table
@@ -67,6 +69,7 @@ Node* createNode(int id, const char* ip) {
     strncpy(newNode->Ip, ip, MAX_IP_LENGTH - 1);
     newNode->Ip[MAX_IP_LENGTH - 1] = '\0'; // Ensure null-termination
     newNode->succesor = NULL;
+    newNode->predecessor = NULL;
     newNode->fileContentPath[0] = '\0'; // Initialize file content path to empty string
     return newNode;
 }
@@ -99,9 +102,37 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     return node; // If no successor is found in the finger table, return the current node
 }
 
+//Functions for inserting a new node into the network and updating the finger tables of existing nodes
 
-//Funciones para fines de desarrollo
 
+void update_others(Node* currentNode) {
+    //Update the finger tables of existing nodes to include the new node
+    for (size_t i = 1; i <= MAX_NUMBER_NODES; i++)
+    {
+        int predecessor = find_predecessor(currentNode, (currentNode->id - (int)pow(2, i - 1) + MAX_NUMBER_NODES) % MAX_NUMBER_NODES); // Calculate the ID of the predecessor node for the current finger table entry
+        Node* predNode = find_predecessor(currentNode, predId); // Find the predecessor node for the calculated ID
+        update_finger_table(predNode, currentNode, i); // Update the finger table of the predecessor node to include the new node
+    }
+} 
+
+void update_finger_table(Node* existingNode, Node* newNode, int tableEntryNumber) {
+    //Update the finger table of the existing node to include the new node
+    if (newNode->id >= existingNode->id && newNode->id <= existingNode->fingerTable[tableEntryNumber].upperIntervalLimit) {
+        existingNode->fingerTable[tableEntryNumber].successor = newNode;
+        
+        Node* p = existingNode->predecessor;
+
+        update_finger_table(p, newNode, tableEntryNumber); //Recursively update the finger tables of the predecessor nodes
+
+        strncpy(existingNode->fingerTable[tableEntryNumber].Ip, newNode->Ip, MAX_IP_LENGTH - 1);
+        existingNode->fingerTable[tableEntryNumber].Ip[MAX_IP_LENGTH - 1] = '\0'; // Ensure null-termination
+    }
+}
+
+
+
+
+//Troublshooting functions
 
 void nodePrint(Node* node) {
     if (node == NULL) {
