@@ -104,7 +104,7 @@ Node* closest_preceding_finger(Node* node, int targetId) {
 
 //Functions for inserting a new node into the network and updating the finger tables of existing nodes
 
-
+//Prueba de commit
 void update_others(Node* currentNode) {
     //Update the finger tables of existing nodes to include the new node
     for (size_t i = 1; i <= MAX_NUMBER_NODES; i++)
