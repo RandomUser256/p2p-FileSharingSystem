@@ -23,17 +23,36 @@ int main() {
 
     join(node1, node2);
     join(node2, node3);
+
+    stabilize(node2);
+    fix_fingers(node1);
+
     join(node3, node4);
+
+    stabilize(node3);
+    fix_fingers(node2);
+
     join(node4, node5);
+
+    stabilize(node4);
+    fix_fingers(node3);
+
     join(node5, node6);
+
+    stabilize(node5);
+    fix_fingers(node4);
+
     join(node6, node7);
+
+    stabilize(node6);
+    fix_fingers(node5);
 
     Node* tempNode;
 
     tempNode = find_successor(node1, 2);
     printf("Node 1 finds successor of 2: %d\n", tempNode->id);
 
-    tempNode = find_successor(node1, 4);
+    tempNode = find_successor(node3, 4);
     printf("Node 1 finds successor of 4: %d\n", tempNode->id);
 
     tempNode = find_successor(node4, 5);

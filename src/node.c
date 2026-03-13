@@ -93,11 +93,23 @@ Node* createNode(int id, const char* ip) {
     newNode->id = id;
     strncpy(newNode->Ip, ip, MAX_IP_LENGTH - 1);
     newNode->Ip[MAX_IP_LENGTH - 1] = '\0'; // Ensure null-termination
-    newNode->successor = NULL;
-    newNode->predecessor = NULL;
+    newNode->successor = newNode;
+    newNode->predecessor = newNode;
     newNode->fileContentPath[0] = '\0'; // Initialize file content path to empty string
 
-    newNode->fingerTable[0] = createFingerTableEntry(1, newNode, NULL); // Initialize the first entry in the finger table with the new node as its own successor
+    //newNode->fingerTable[0] = createFingerTableEntry(1, newNode, newNode); // Initialize the first entry in the finger table with the new node as its own successor
+    // Initialize finger table
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        newNode->fingerTable[i].start =
+            (id + (1U << i)) % MAX_NUMBER_NODES;
+
+        newNode->fingerTable[i].lowerIntervalLimit = 0;
+        newNode->fingerTable[i].upperIntervalLimit = 0;
+
+        newNode->fingerTable[i].successor = newNode;
+
+        newNode->fingerTable[i].Ip[0] = '\0';
+    }
     return newNode;
 }
 
@@ -109,8 +121,15 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     for (size_t i = NODE_ID_LENGTH; i > 0; i--)
     {
         //if the successor of the finger table entry is valid and between current node's id and the target id, return that successor
-        if (node->fingerTable[i-1].successor != NULL && in_open_interval(node->fingerTable[i-1].successor->id, node->id, targetId)) {
-            return node->fingerTable[i-1].successor;
+        //ERROR: successor->id is not readable, cuases memery exception
+
+        Node* finger = node->fingerTable[i-1].successor;
+
+        if (finger != NULL &&
+            finger != node &&
+            in_open_interval(finger->id, node->id, targetId))
+        {
+            return finger;
         }
     }
     return node; // If no successor is found in the finger table, return the current node
@@ -122,10 +141,18 @@ Node* find_predecessor(Node* node, int targetId) {
     }
 
     Node* node2 = node;
+    
     //Traverse network until we find a range between two nodes where the targetId fits
     while (node2->successor != NULL && !in_open_interval(targetId, node2->id, node2->successor->id)) {
-        node2 = closest_preceding_finger(node2, targetId); // Move to the closest preceding finger to continue searching for the predecessor
+        //node2 = closest_preceding_finger(node2, targetId); // Move to the closest preceding finger to continue searching for the predecessor
+        Node* next = closest_preceding_finger(node2, targetId);
+
+        if (next == node2)
+            break;
+
+        node2 = next;
     }
+
     return node2; // Return the predecessor node
 }
 
@@ -143,20 +170,20 @@ Node* find_successor(Node* node, int targetId) {
 
 //Functions for inserting a new node into the network and updating the finger tables of existing nodes
 Node* init_finger_table(Node* existingNode, Node* newNode) {
-    if (!existingNode) {
+    if (!existingNode || !existingNode->successor) {
         return NULL;
     }
 
-    existingNode->fingerTable[0].successor = find_successor(newNode, existingNode->fingerTable[0].start); // Initialize the second entry in the finger table based on the existing node's information
+    newNode->fingerTable[0].successor = find_successor(existingNode, newNode->fingerTable[0].start); // Initialize the second entry in the finger table based on the existing node's information
 
-    existingNode->predecessor = existingNode->successor->predecessor; // Set the predecessor of the existing node to the predecessor of its successor
+    newNode->predecessor = newNode->fingerTable[0].successor->predecessor; // Set the predecessor of the existing node to the predecessor of its successor
 
-    existingNode->successor->predecessor = existingNode; // Update the predecessor of the existing node's successor to point to the existing node
+    newNode->fingerTable[0].successor->predecessor = newNode; // Update the predecessor of the existing node's successor to point to the existing node
 
     //Initialize the finger table of the new node based on an existing node in the network
     for (size_t i = 2; i <= NODE_ID_LENGTH; i++)
     {
-        if (existingNode->fingerTable[i-1].start >= existingNode->id && existingNode->fingerTable[i-1].start < existingNode->fingerTable[i-2].start) {
+        if (in_open_interval(newNode->fingerTable[i].start, newNode->id, newNode->fingerTable[i-1].successor->id)) {
             existingNode->fingerTable[i-1] = createFingerTableEntry(i, newNode, existingNode->fingerTable[i-1].successor); // If the start of the interval for the current entry in the existing node's finger table falls within a certain range, copy that entry to the new node's finger table
         }
         else {
@@ -172,7 +199,7 @@ void update_finger_table(Node* existingNode, Node* newNode, int tableEntryNumber
     }
 
     //Update the finger table of the existing node to include the new node
-    if (newNode->id >= existingNode->id && newNode->id < existingNode->fingerTable[tableEntryNumber-1].successor->id) {
+    if (in_open_interval(newNode->id, existingNode->id, existingNode->fingerTable[tableEntryNumber-1].successor->id)) {
         existingNode->fingerTable[tableEntryNumber-1].successor = newNode;
         
         Node* p = existingNode->predecessor;
@@ -193,8 +220,9 @@ void update_others(Node* currentNode) {
     //Update the finger tables of existing nodes to include the new node
     for (size_t i = 1; i <= NODE_ID_LENGTH; i++)
     {
+        int id = (currentNode->id - (1U << (i - 1)) + MAX_NUMBER_NODES) % MAX_NUMBER_NODES;
         //Obtain the ID corresponding to the successor of the node we want
-        Node* predecessor = find_predecessor(currentNode, (currentNode->id - (1U << (i - 1))) % MAX_NUMBER_NODES); // Calculate the ID of the predecessor node for the current finger table entry
+        Node* predecessor = find_predecessor(currentNode, id); // Calculate the ID of the predecessor node for the current finger table entry
 
         update_finger_table(predecessor, currentNode, i); // Update the finger table of the predecessor node to include the new node
     }
@@ -215,7 +243,7 @@ void join(Node* existingNode, Node* newNode) {
         {
             existingNode->fingerTable[i-1].successor = existingNode; // If there are no existing nodes in the network, initialize the finger table of the new node with itself as the successor for all entries
         }
-        existingNode->predecessor = newNode; // Set the predecessor of the existing node to the new node
+        existingNode->predecessor = existingNode; // Set the predecessor of the existing node to itself if no valid predecessor exists
     }
 }
 
@@ -286,9 +314,12 @@ void freeNode(Node* node) {
 }
 
 void printNodeList(Node* head) {
+    Node* start = head;
     Node* current = head;
-    while (current != NULL) {
+
+    do {
         nodePrint(current);
         current = current->successor;
-    }
+    } while (current != start);
+    
 }
