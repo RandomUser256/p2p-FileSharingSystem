@@ -2,7 +2,19 @@
 Considerations for node.c:
 - Finger table: in fucntions regarding the finger table, sections that call "fingerTableEntry[i].successor" may need to be change to "fingerTableEntry[i].start". Have to check algorithm
     - In sudo code it is sections that use 'finger[i].node'
+
 */
+
+/*
+ERRORS
+    - find_successor() does not consistently display correct results
+        - Possibly due to the incorrect generation of finger table entries. Intervals do not always make sense and they are not correctly updated.
+            - Find way to ensure every node accurately updates its finger table entries when a new node joins the network. This may involve implementing a more robust mechanism for updating the finger tables of existing nodes when a new node joins.
+                - In particualr the interval of entries is causing problems. 
+
+*/
+
+
 #include <stdio.h>
 #include <stdbool.h>
 
@@ -87,6 +99,27 @@ FingerTableEntry createFingerTableEntry(int entryNumber, Node* parent_node, Node
     return entry;
 }
 
+void updateValuesFingerTable(Node* node) {
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        node->fingerTable[i].start =
+            (node->id + (1U << i-1)) % MAX_NUMBER_NODES;
+
+        node->fingerTable[i].lowerIntervalLimit = node->fingerTable[i].start;
+
+        if (i < NODE_ID_LENGTH - 1) {
+            node->fingerTable[i].upperIntervalLimit = node->fingerTable[i+1].start;
+        } else {
+            node->fingerTable[i].upperIntervalLimit = node->fingerTable[0].start; // Wrap around for the last entry
+        }
+
+        //node->fingerTable[i].upperIntervalLimit = node->fingerTable[i+1].start;
+
+        node->fingerTable[i].successor = node;
+
+        node->fingerTable[i].Ip[0] = '\0';
+    }
+}
+
 //Review function as node properties change
 Node* createNode(int id, const char* ip) {
     Node* newNode = malloc(sizeof(Node));
@@ -101,14 +134,22 @@ Node* createNode(int id, const char* ip) {
     // Initialize finger table
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
         newNode->fingerTable[i].start =
-            (id + (1U << i)) % MAX_NUMBER_NODES;
+            (id + (1U << i-1)) % MAX_NUMBER_NODES;
 
-        newNode->fingerTable[i].lowerIntervalLimit = 0;
-        newNode->fingerTable[i].upperIntervalLimit = 0;
+        newNode->fingerTable[i].lowerIntervalLimit = newNode->fingerTable[i].start;
+
+        if (i < NODE_ID_LENGTH - 1) {
+            newNode->fingerTable[i].upperIntervalLimit = newNode->fingerTable[i+1].start;
+        } else {
+            newNode->fingerTable[i].upperIntervalLimit = newNode->fingerTable[0].start; // Wrap around for the last entry
+        }
+
+        //newNode->fingerTable[i].upperIntervalLimit = newNode->fingerTable[i+1].start;
 
         newNode->fingerTable[i].successor = newNode;
 
         newNode->fingerTable[i].Ip[0] = '\0';
+        
     }
     return newNode;
 }
@@ -121,7 +162,6 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     for (size_t i = NODE_ID_LENGTH; i > 0; i--)
     {
         //if the successor of the finger table entry is valid and between current node's id and the target id, return that successor
-        //ERROR: successor->id is not readable, cuases memery exception
 
         Node* finger = node->fingerTable[i-1].successor;
 
@@ -228,6 +268,8 @@ void update_others(Node* currentNode) {
     }
 } 
 
+//First version
+/*
 void join(Node* existingNode, Node* newNode) {
     if (!existingNode) {
         return;
@@ -245,8 +287,19 @@ void join(Node* existingNode, Node* newNode) {
         }
         existingNode->predecessor = existingNode; // Set the predecessor of the existing node to itself if no valid predecessor exists
     }
+}*/
+
+//Second version of join, supports concurrent node joins
+void join(Node* existingNode, Node* newNode) {
+    if (!existingNode || !newNode) {
+        return;
+    }
+
+    existingNode->predecessor = NULL;
+    existingNode->successor = find_successor(newNode, existingNode->id); // Find the successor of the existing node using the new node as a reference point
 }
 
+//First version of fix_fingers
 //Functions for maintaining the integrity of the finger tables and ensuring that they are up to date with the current state of the network
 void fix_fingers(Node* node) {
     if (!node) {
@@ -258,8 +311,13 @@ void fix_fingers(Node* node) {
     //Implementation would involve checking each entry in the finger table and updating it if necessary
     int i = 1 + rand() % NODE_ID_LENGTH; // Randomly select an entry in the finger table to check
     node->fingerTable[i-1].successor = find_successor(node, node->fingerTable[i-1].start); // Update the successor for the selected entry in the finger table
-}
 
+    //update_finger_table(node, node->fingerTable[i-1].successor, i); // Update the start, lower interval limit, and upper interval limit for the selected entry in the finger table
+}
+    
+
+//First version of notify
+/*
 void notify(Node* node, Node* potentialPredecessor) {
     if (!node || !potentialPredecessor) {
         return;
@@ -270,8 +328,21 @@ void notify(Node* node, Node* potentialPredecessor) {
     if (node->predecessor == NULL || (potentialPredecessor->id > node->predecessor->id && potentialPredecessor->id < node->id)) {
         node->predecessor = potentialPredecessor; // Update the predecessor of the node to the new potential predecessor
     }
+} */
+
+//Second version of notify, supports concurrent node joins
+void notify(Node* node, Node* potentialPredecessor) {
+    if (!node || !potentialPredecessor) {
+        return;
+    }
+
+    if (node != NULL && (node->predecessor == NULL || in_open_interval(potentialPredecessor->id, node->predecessor->id, node->id))) {
+        node->predecessor = potentialPredecessor; // Update the predecessor of the node to the new potential predecessor if it does not already have a predecessor
+    }
 }
 
+//First version of stabilize
+/*
 void stabilize(Node* node) {
     if (!node || !node->successor) {
         return;
@@ -283,6 +354,22 @@ void stabilize(Node* node) {
     if (x != NULL && x->id > node->id && x->id < node->successor->id) {
         node->successor = x; // Update the successor pointer if a closer predecessor is found
     }
+    notify(node->successor, node); // Notify the successor about the current node as a potential predecessor
+}
+    */
+
+//Second version of stabilize, supports concurrent node joins
+void stabilize(Node* node) {
+    if (!node || !node->successor) {
+        return;
+    }
+
+    Node* x = node->successor->predecessor; // Get the predecessor of the current node's successor
+
+    if (x!= NULL && in_open_interval(x->id, node->id, node->successor->id)) {
+        node->successor = x;
+    }
+
     notify(node->successor, node); // Notify the successor about the current node as a potential predecessor
 }
 
