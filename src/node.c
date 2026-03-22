@@ -1,16 +1,10 @@
 /*
 Considerations for node.c:
-- Finger table: in fucntions regarding the finger table, sections that call "fingerTableEntry[i].successor" may need to be change to "fingerTableEntry[i].start". Have to check algorithm
-    - In sudo code it is sections that use 'finger[i].node'
-
 */
 
 /*
 ERRORS
-    - find_successor() does not display correct results if called from the first or last node in the ring
-        - May be due to linking the last node with the first node, wrap around seems to cause this issue
     - When looking for the successor of an ID that is active in the ring, it returns that same ID instead of its successor 
-
 */
 
 
@@ -115,7 +109,7 @@ FingerTableEntry createFingerTableEntry(int entryNumber, Node* parent_node, Node
 void updateValuesFingerTable(Node* node) {
     for (int i = 1; i <= NODE_ID_LENGTH; i++) {
         node->fingerTable[i-1].start =
-            (node->id + (1U << i-1)) % MAX_NUMBER_NODES;
+            (node->id + (1U << (i-1))) % MAX_NUMBER_NODES;
 
         node->fingerTable[i-1].lowerIntervalLimit = node->fingerTable[i-1].start;
 
@@ -147,7 +141,7 @@ Node* createNode(int id, const char* ip) {
     // Initialize finger table
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
         newNode->fingerTable[i].start =
-            (id + (1U << i-1)) % MAX_NUMBER_NODES;
+            (id + (1U << (i-1))) % MAX_NUMBER_NODES;
 
         newNode->fingerTable[i].lowerIntervalLimit = newNode->fingerTable[i].start;
 
@@ -195,7 +189,7 @@ Node* find_predecessor(Node* node, int targetId) {
 
     Node* n = node;
 
-    while (!half_left_open_interval(node->id, n->id, n->successor->id)) {
+    while (!half_left_open_interval(targetId, n->id, n->successor->id)) {
         Node* next = closest_preceding_finger(n, targetId);
 
         if (next == n) break;  // prevent infinite loop
@@ -280,32 +274,34 @@ void update_others(Node* currentNode) {
 
 //Second version of join, supports concurrent node joins
 void join(Node* existingNode, Node* newNode) {
-    if (!existingNode || !newNode) {
+    if (!newNode) {
         return;
     }
 
     if (existingNode == NULL) {
-        // first node in the network
+        // Initializing first node when it is the only one in the network
         newNode->successor = newNode;
         newNode->predecessor = newNode;
 
+        /*
         for (int i = 0; i < NODE_ID_LENGTH; i++) {
             newNode->fingerTable[i].successor = newNode;
         }
+        */
         return;
+    } else {
+        Node* successor = find_successor(existingNode, newNode->id); // Find the successor of the existing node using the new node as a reference point
+
+        newNode->successor = successor; // Update the successor of the existing node to point to the new node
+
+        newNode->predecessor = successor->predecessor; // Update the predecessor of the existing node to point to the new node
+
+        if (successor->predecessor != NULL) {
+            successor->predecessor->successor = newNode;
+        }
+
+        successor->predecessor = newNode; // Update the predecessor of the existing node's successor to point to the new node
     }
-    
-    Node* successor = find_successor(existingNode, newNode->id); // Find the successor of the existing node using the new node as a reference point
-
-    newNode->successor = successor; // Update the successor of the existing node to point to the new node
-
-    newNode->predecessor = successor->predecessor; // Update the predecessor of the existing node to point to the new node
-
-    if (successor->predecessor != NULL) {
-        successor->predecessor->successor = newNode;
-    }
-
-    successor->predecessor = newNode; // Update the predecessor of the existing node's successor to point to the new node
 }
 
 //First version of fix_fingers
@@ -386,4 +382,19 @@ void printNodeList(Node* head) {
         current = current->successor;
     } while (current != start);
     
+}
+
+void check_ring(Node* start) {
+    Node* curr = start;
+
+    do {
+        if (curr->successor->predecessor != curr) {
+            printf("ERROR: successor->predecessor mismatch at node %d\n", curr->id);
+        }
+        if (curr->predecessor->successor != curr) {
+            printf("ERROR: predecessor->successor mismatch at node %d\n", curr->id);
+        }
+
+        curr = curr->successor;
+    } while (curr != start);
 }
