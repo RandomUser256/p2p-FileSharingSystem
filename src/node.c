@@ -141,12 +141,12 @@ Node* createNode(int id, const char* ip) {
     // Initialize finger table
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
         newNode->fingerTable[i].start =
-            (id + (1U << (i-1))) % MAX_NUMBER_NODES;
+            (id + (1U << i)) % MAX_NUMBER_NODES;
 
         newNode->fingerTable[i].lowerIntervalLimit = newNode->fingerTable[i].start;
 
-        if (i < NODE_ID_LENGTH - 2) {
-            newNode->fingerTable[i].upperIntervalLimit = (id + (1U << i)) % MAX_NUMBER_NODES;
+        if (i < NODE_ID_LENGTH - 1) {
+            newNode->fingerTable[i].upperIntervalLimit = (id + (1U << (i + 1))) % MAX_NUMBER_NODES;
         } else {
             newNode->fingerTable[i].upperIntervalLimit = newNode->fingerTable[0].start; // Wrap around for the last entry
         }
@@ -156,7 +156,6 @@ Node* createNode(int id, const char* ip) {
         newNode->fingerTable[i].successor = newNode;
 
         newNode->fingerTable[i].Ip[0] = '\0';
-        
     }
     return newNode;
 }

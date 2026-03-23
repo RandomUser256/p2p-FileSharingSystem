@@ -6,10 +6,8 @@
 
 /*
 ERRORS
-    - 
-
-CONSIDERATIONS
-    - Do not call join(lastNode, firstNode), it causes first node's successor to loop back to itself, breaking the ring 
+    - Program currently experiences a segmentation fault, which coudl be caused by trying to dereference a NULL pointer value. Or can also be by asigning a value to a unitialized pointer.
+        - Add protection to null values
 */
 
 int main() {
@@ -52,8 +50,6 @@ int main() {
 
     join(node6, node7);
 
-    //join(node7, node1); // Node 1 joins again, should not cause any issues
-
     stabilize(node1);
     
     stabilize(node2);
@@ -82,24 +78,25 @@ int main() {
 
     Node* tempNode;
 
-    tempNode = find_successor(node5, 4);
-    printf("Node 5 finds successor of 2: %d\n", tempNode->id);
+    tempNode = find_successor(node3, 12);
+    printf("Node 6 finds successor of 6: %d\n", tempNode->id);
 
-    tempNode = find_successor(node7, 0);
-    printf("Node 6 finds successor of 0: %d\n", tempNode->id);
-
-    tempNode = find_successor(node1, 7);
+    tempNode = find_successor(node2, 7);
     printf("Node 2 finds successor of 7: %d\n", tempNode->id);
 
     tempNode = find_successor(node3, 13);
     printf("Node 3 finds successor of 13: %d\n", tempNode->id);
 
-    //Free memory of dynamically allocated nodes
-    Node* current = node1;
-    while (current != NULL) {
-        Node* next = current->successor;
-        freeNode(current);
-        current = next;
+    //Free memory of dynamically allocated nodes (handle circular ring safely)
+    if (node1 != NULL) {
+        Node* current = node1;
+        Node* next;
+
+        do {
+            next = current->successor;
+            freeNode(current);
+            current = next;
+        } while (current != node1);
     }
 
     return 0;
