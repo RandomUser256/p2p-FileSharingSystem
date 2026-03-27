@@ -128,14 +128,15 @@ void updateValuesFingerTable(Node* node) {
 }
 
 //Review function as node properties change
-Node* createNode(int id, const char* ip) {
+Node* createNode(int id, const char* ip, const char* fileContentPath) {
     Node* newNode = malloc(sizeof(Node));
     newNode->id = id;
     strncpy(newNode->Ip, ip, MAX_IP_LENGTH - 1);
     newNode->Ip[MAX_IP_LENGTH - 1] = '\0'; // Ensure null-termination
+    strncpy(newNode->fileContentPath, fileContentPath, MAX_FILE_PATH_LENGTH - 1);
+    newNode->fileContentPath[MAX_FILE_PATH_LENGTH - 1] = '\0'; // Ensure null-termination
     newNode->successor = newNode;
     newNode->predecessor = newNode;
-    newNode->fileContentPath[0] = '\0'; // Initialize file content path to empty string
 
     //newNode->fingerTable[0] = createFingerTableEntry(1, newNode, newNode); // Initialize the first entry in the finger table with the new node as its own successor
     // Initialize finger table
@@ -345,6 +346,12 @@ void stabilize(Node* node) {
     notify(node->successor, node); // Notify the successor about the current node as a potential predecessor
 }
 
+void freeNode(Node* node) {
+    if (node != NULL) {
+        free(node);
+    }
+}
+
 //Troublshooting functions
 
 void nodePrint(Node* node) {
@@ -363,12 +370,6 @@ void nodePrint(Node* node) {
         printf("Node File Content Path: %s\n", node->fileContentPath);
     } else {
         printf("Node File Content Path: None\n");
-    }
-}
-
-void freeNode(Node* node) {
-    if (node != NULL) {
-        free(node);
     }
 }
 

@@ -2,7 +2,8 @@
 #include <math.h>
 #include <time.h>
 
-#include "src/node.c"
+//#include "src/node.c"
+#include "src/DHASH.c"
 
 /*
 ERRORS
@@ -13,13 +14,13 @@ ERRORS
 int main() {
     srand(time(NULL));
     
-    Node* node1 = createNode(0, "");
-    Node* node2 = createNode(1, "");
-    Node* node3 = createNode(3, "");
-    Node* node4 = createNode(6, "");
-    Node* node5 = createNode(7, "");
-    Node* node6 = createNode(11, "");
-    Node* node7 = createNode(14, "");
+    Node* node1 = createNode(0, "", "fileSharingTesting/dir1");
+    Node* node2 = createNode(1, "", "fileSharingTesting/dir2");
+    Node* node3 = createNode(3, "", "fileSharingTesting/dir3");
+    Node* node4 = createNode(6, "", "fileSharingTesting/dir1");
+    Node* node5 = createNode(7, "", "fileSharingTesting/dir2");
+    Node* node6 = createNode(11, "", "fileSharingTesting/dir3");
+    Node* node7 = createNode(14, "", "fileSharingTesting/dir1");
 
     join(node1, NULL); // First node joins the network by itself
 
@@ -86,6 +87,9 @@ int main() {
 
     tempNode = find_successor(node3, 13);
     printf("Node 3 finds successor of 13: %d\n", tempNode->id);
+
+
+    insert(node1, "file1", "fileSharingTesting/dir1/file1", 3);
 
     //Free memory of dynamically allocated nodes (handle circular ring safely)
     if (node1 != NULL) {
