@@ -50,55 +50,37 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
     //Hash the identifier and find the node responsible for the given identifier
     //Node* destinationNode1 = lookup(hostNode, identifier);
 
-    Node* destinationNode1 = lookup(hostNode, destinationNodeId);
+    Node* destinationNode = lookup(hostNode, destinationNodeId);
 
-    if (destinationNode1 == NULL) {
+    if(destinationNode == NULL) {
+        printf("Error: Destination node not found\n");
         return;
     }
 
-    //Is missing SSH connectivity
+    // Build destination path safely
+    char destinationFilePath[MAX_FILE_PATH_LENGTH];
 
-    //Store the file path in the responsible node
-    // Order of arguments: destination path, source path, maximum number of characters to copy
+    strncpy(destinationFilePath, destinationNode->fileContentPath, MAX_FILE_PATH_LENGTH - 1);
+    destinationFilePath[MAX_FILE_PATH_LENGTH - 1] = '\0';
 
-    FILE* file = fopen(sourceFilePath, "r");
+    strncat(destinationFilePath, "/", MAX_FILE_PATH_LENGTH - strlen(destinationFilePath) - 1);
+    strncat(destinationFilePath, identifier, MAX_FILE_PATH_LENGTH - strlen(destinationFilePath) - 1);
 
-    if (file == NULL) {
-        printf("Error opening file: %s. Value of errno: %d\n", hostNode->fileContentPath+*identifier, errno);
-        return;
+    printf("Copying file to node %d (%s)\n",
+           destinationNode->id,
+           destinationNode->Ip); 
+    //SCP COMMAND
+    char command[512];
+
+    sprintf(command, "scp %s %s:%s", sourceFilePath, destinationNode->Ip, destinationFilePath);
+
+    printf("Executing: %s\n", command);
+
+    int result = system(command);
+
+    if(result != 0) {
+        printf("Error: SCP failed\n");
+    } else {
+        printf("File transferred successfully\n");
     }
-
-    //Missing SSH connectivity to copy the file content from the host node to the destination node
-
-    char* destinationFilePath = generateDestinationFilePath(destinationNode1, identifier);
-
-    if (destinationFilePath == NULL) {
-        fclose(file);
-        return;
-    } 
-
-    printf("Host node file content path: %s\n", destinationFilePath);
-
-    FILE* destinationFile = fopen(destinationFilePath, "w");
-
-    if (destinationFile == NULL) {
-        printf("Error opening destination file: %s. Value of errno: %d\n", destinationNode1->fileContentPath+*identifier, errno);
-        fclose(file);
-        return;
-    }
-
-    //Reads the characters from the source file
-    int c;
-
-    //Copy the file content from the host node to the destination node
-    while ((c=fgetc(file)) != EOF) {
-        fputc(c, destinationFile);
-    }
-
-
-    //Close files
-    fclose(file);
-    fclose(destinationFile);
-
-    return;
 }
