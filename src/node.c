@@ -127,6 +127,38 @@ void updateValuesFingerTable(Node* node) {
     }
 }
 
+//Forward declaration
+Node* createNode(int id, const char* ip, const char* fileContentPath);
+
+Node* loadNodeFromFile(const char* filepath) {
+    FILE* file = fopen(filepath, "r");
+
+    if (!file) {
+        printf("Error opening Node file\n");
+        return NULL;
+    }
+
+    int id;
+    char ip[MAX_IP_LENGTH];
+    char path[MAX_FILE_PATH_LENGTH];
+
+    char line[256];
+
+    while (fgets(line, sizeof(line), file)) {
+        if (sscanf(line, "id=%d", &id) == 1) continue;
+        if (sscanf(line, "ip=%s", ip) == 1) continue;
+        if (sscanf(line, "path=%s", path) == 1) continue;
+    }
+
+    fclose(file);
+
+    Node* node = createNode(id, ip, path);
+
+    printf("Loaded node: ID=%d IP=%s PATH=%s\n", id, ip, path);
+
+    return node;
+}
+
 //Review function as node properties change
 Node* createNode(int id, const char* ip, const char* fileContentPath) {
     Node* newNode = malloc(sizeof(Node));
@@ -397,4 +429,14 @@ void check_ring(Node* start) {
 
         curr = curr->successor;
     } while (curr != start);
+}
+
+void executeSSH(const char* ip, const char* command) {
+    char fullCommand[512];
+
+    sprintf(fullCommand, "ssh %s \"%s\"", ip, command);
+
+    printf("SSH EXEC: %s\n", fullCommand);
+
+    system(fullCommand);
 }
