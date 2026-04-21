@@ -33,15 +33,15 @@ Node* lookup(Node* node, /*char* identifier*/ int identifier) {
 }
 
 char* generateDestinationFilePath(Node* destinationNode, char* identifier) {
-    char* destinationFilePath = destinationNode->fileContentPath;
-    destinationFilePath = strcat(destinationFilePath, "/");
-    destinationFilePath = strcat(destinationFilePath, identifier);
-
-    if (strlen(destinationFilePath) >= MAX_FILE_PATH_LENGTH) {
-        printf("Error: Destination file path exceeds maximum length. Value of errno: %d\n", errno);
+    static char destinationFilePath[MAX_FILE_PATH_LENGTH];
+    int written = snprintf(destinationFilePath, MAX_FILE_PATH_LENGTH,
+                           "%s/%s",
+                           destinationNode->fileContentPath,
+                           identifier);
+    if (written < 0 || written >= MAX_FILE_PATH_LENGTH) {
+        printf("Error: Destination file path exceeds maximum length.\n");
         return NULL;
-    } 
-
+    }
     return destinationFilePath;
 }
 
@@ -83,4 +83,109 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
     } else {
         printf("File transferred successfully\n");
     }
+}
+
+Node* remote_find_successor(const char* ip, int targetId) {
+    char command[512];
+
+    snprintf(command, sizeof(command),
+        "ssh %s \"./scripts/node_comms find_successor %d\" 2>/dev/null",
+        ip,
+        targetId
+    );
+
+    FILE* fp = popen(command, "r");
+
+    if (!fp) {
+        printf("SSH failed\n");
+        return NULL;
+    }
+
+    char line[256];
+    line[0] = '\0';
+    char tmp[256];
+
+    while (fgets(tmp, sizeof(tmp), fp)) {
+        if (tmp[0] != '\n' && tmp[0] != '\0')
+            memcpy(line, tmp, sizeof(line));
+    }
+
+    int id;
+    char remoteIp[16];
+
+    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
+        printf("Invalid response: %s\n", line);
+        pclose(fp);
+        return NULL;
+    }
+
+    pclose(fp);
+
+    return createNode(id, remoteIp, "");
+}
+
+Node* remote_get_successor(const char* ip) {
+    char command[256];
+
+    snprintf(command, sizeof(command),
+        "ssh %s \"./scripts/node_comms get_successor\" 2>/dev/null",
+        ip
+    );
+
+    FILE* fp = popen(command, "r");
+    if (!fp) return NULL;
+
+    char line[128];
+    line[0] = '\0';
+    char tmp[128];
+
+    // Keep reading until EOF, always preserving the last non-empty line
+    while (fgets(tmp, sizeof(tmp), fp)) {
+        if (tmp[0] != '\n' && tmp[0] != '\0')
+            memcpy(line, tmp, sizeof(line));
+    }
+
+    int id;
+    char remoteIp[16];
+
+    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
+        pclose(fp);
+        return NULL;
+    }
+
+    pclose(fp);
+    return createNode(id, remoteIp, "");
+}
+
+Node* remote_closest_preceding_finger(const char* ip, int targetId) {
+    char command[256];
+
+    snprintf(command, sizeof(command),
+        "ssh %s \"./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
+        ip,
+        targetId
+    );
+
+    FILE* fp = popen(command, "r");
+    if (!fp) return NULL;
+
+    char line[128];
+    line[0] = '\0';
+    char tmp[128];
+
+    while (fgets(tmp, sizeof(tmp), fp)) {
+        if (tmp[0] != '\n' && tmp[0] != '\0')
+            memcpy(line, tmp, sizeof(line));
+    }
+
+    int id;
+    char remoteIp[16];
+
+    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
+        pclose(fp);
+        return NULL;
+    }
+
+    pclose(fp);
+    return createNode(id, remoteIp, "");
 }

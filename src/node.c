@@ -17,7 +17,6 @@ ERRORS
 #include <time.h>
 
 
-
 #define MAX_IP_LENGTH 16
 #define MAX_FILE_PATH_LENGTH 256
 #define NODE_ID_LENGTH 4 //in bits, equal to 16 total nodes
@@ -134,29 +133,62 @@ Node* loadNodeFromFile(const char* filepath) {
     FILE* file = fopen(filepath, "r");
 
     if (!file) {
-        printf("Error opening Node file\n");
+        fprintf(stderr, "Error opening Node file\n");
         return NULL;
     }
 
-    int id;
-    char ip[MAX_IP_LENGTH];
-    char path[MAX_FILE_PATH_LENGTH];
+    int  id    = 0;
+    char ip[MAX_IP_LENGTH]          = {0};
+    char path[MAX_FILE_PATH_LENGTH] = {0};
+    int  succId = -1; char succIp[MAX_IP_LENGTH] = {0};
+    int  predId = -1; char predIp[MAX_IP_LENGTH] = {0};
 
-    char line[256];
+    char line[512];
 
     while (fgets(line, sizeof(line), file)) {
-        if (sscanf(line, "id=%d", &id) == 1) continue;
-        if (sscanf(line, "ip=%s", ip) == 1) continue;
-        if (sscanf(line, "path=%s", path) == 1) continue;
+        line[strcspn(line, "\r\n")] = '\0';
+
+        if (sscanf(line, "id=%d",               &id)             == 1) continue;
+        if (sscanf(line, "ip=%15s",              ip)              == 1) continue;
+        if (sscanf(line, "fileContentPath=%255s", path)           == 1) continue;
+        if (sscanf(line, "successor=%d %15s",   &succId, succIp)  == 2) continue;
+        if (sscanf(line, "predecessor=%d %15s", &predId, predIp)  == 2) continue;
     }
 
     fclose(file);
 
     Node* node = createNode(id, ip, path);
 
-    printf("Loaded node: ID=%d IP=%s PATH=%s\n", id, ip, path);
+    if (succId != -1)
+        node->successor   = createNode(succId, succIp, "");
+    if (predId != -1)
+        node->predecessor = createNode(predId, predIp, "");
+
+    fprintf(stderr, "Loaded node: ID=%d IP=%s PATH=%s succ=%d pred=%d\n",
+            id, ip, path, succId, predId);
 
     return node;
+}
+
+void saveNodeToFile(Node* node, const char* filepath) {
+    FILE* file = fopen(filepath, "w");
+
+    if (!file) {
+        printf("Error saving node\n");
+        return;
+    }
+
+    fprintf(file, "id=%d\n", node->id);
+    fprintf(file, "ip=%s\n", node->Ip);
+    fprintf(file, "fileContentPath=%s\n", node->fileContentPath);
+
+    if (node->successor)
+        fprintf(file, "successor=%d %s\n", node->successor->id, node->successor->Ip);
+
+    if (node->predecessor)
+        fprintf(file, "predecessor=%d %s\n", node->predecessor->id, node->predecessor->Ip);
+
+    fclose(file);
 }
 
 //Review function as node properties change
@@ -214,6 +246,12 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     return node; // If no successor is found in the finger table, return the current node
 }
 
+Node* remote_find_successor(const char* ip, int targetId);
+Node* remote_get_successor(const char* ip);
+Node* remote_closest_preceding_finger(const char* ip, int targetId);
+void freeNode(Node* node);
+
+/*
 Node* find_predecessor(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -230,8 +268,91 @@ Node* find_predecessor(Node* node, int targetId) {
     }
 
     return n;
+}*/
+
+Node* find_predecessor(Node* startNode, int id) {
+    if (!startNode || !startNode->successor) {
+        printf("Local node has no successor loaded\n");
+        return NULL;
+    }
+
+    // Early exit using local struct data (no SSH to self):
+    // if id ∈ (startNode, startNode->successor] then startNode is the predecessor.
+    // Skip when id == startNode->id — that requires a full wraparound walk.
+    if (id != startNode->id) {
+        if (half_left_open_interval(id, startNode->id, startNode->successor->id)) {
+            // Always return a fresh heap allocation so callers can freeNode safely.
+            return createNode(startNode->id, startNode->Ip, "");
+        }
+    }
+
+    // Seed the walk. If the local finger table is empty (all entries point to
+    // self), closest_preceding_finger will return startNode itself — in that
+    // case advance directly to startNode's successor so the walk moves forward.
+    Node* cpf = remote_closest_preceding_finger(startNode->Ip, id);
+    if (cpf == NULL) return NULL;
+
+    Node* n;
+    if (cpf->id == startNode->id) {
+        // Finger table gave us nothing useful — step to successor instead.
+        freeNode(cpf);
+        n = createNode(startNode->successor->id, startNode->successor->Ip, "");
+    } else {
+        n = cpf;
+    }
+
+    // Walk the ring hop by hop, advancing through successors when no better
+    // finger is available. Every pointer except startNode is heap-allocated
+    // by createNode/remote_* so it is safe to freeNode on every path.
+    int maxHops = MAX_NUMBER_NODES;
+    while (maxHops-- > 0) {
+        Node* nSucc = remote_get_successor(n->Ip);
+        if (nSucc == NULL) {
+            printf("Error getting successor during traversal\n");
+            freeNode(n);
+            return NULL;
+        }
+
+        // id ∈ (n, nSucc] → n is the predecessor
+        if (half_left_open_interval(id, n->id, nSucc->id)) {
+            freeNode(nSucc);
+            return n;
+        }
+
+        Node* next = remote_closest_preceding_finger(n->Ip, id);
+        freeNode(nSucc);
+
+        if (next == NULL) {
+            printf("Error getting closest preceding finger\n");
+            freeNode(n);
+            return NULL;
+        }
+
+        if (next->id == n->id) {
+            // Finger table on this node is also empty — advance to its successor
+            // rather than stopping, so the walk keeps making progress.
+            freeNode(next);
+            Node* succ = remote_get_successor(n->Ip);
+            if (succ == NULL || succ->id == n->id) {
+                // Truly stuck — return best guess
+                freeNode(succ);
+                return n;
+            }
+            freeNode(n);
+            n = succ;
+            continue;
+        }
+
+        freeNode(n);
+        n = next;
+    }
+
+    printf("find_predecessor: max hops reached\n");
+    freeNode(n);
+    return NULL;
 }
 
+/*
 Node* find_successor(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -243,6 +364,15 @@ Node* find_successor(Node* node, int targetId) {
     }
     return NULL; // If no predecessor is found, return NULL
 } 
+*/
+
+Node* find_successor(Node* node, int id) {
+    Node* pred = find_predecessor(node, id);
+
+    if (pred == NULL) return NULL;
+
+    return remote_get_successor(pred->Ip);
+}
 
 //Functions for inserting a new node into the network and updating the finger tables of existing nodes
 Node* init_finger_table(Node* existingNode, Node* newNode) {

@@ -1,0 +1,5 @@
+id=4
+ip=10.11.20.40
+successor=5 10.11.20.41
+predecessor=6 10.11.20.42
+fileContentPath=shared/files
