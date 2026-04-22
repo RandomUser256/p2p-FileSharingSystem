@@ -59,5 +59,52 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    // print_finger_table
+    if (strcmp(argv[1], "print_finger_table") == 0) {
+        printFingerTable(node);
+        return 0;
+    }
+
+    // save_finger_table
+    if (strcmp(argv[1], "save_finger_table") == 0) {
+        saveFingerTableToFile(node, "nodeInfo/FingerTable");
+        printf("Finger table saved successfully\n");
+        return 0;
+    }
+
+    // load_finger_table
+    if (strcmp(argv[1], "load_finger_table") == 0) {
+        loadFingerTableFromFile(node, "nodeInfo/FingerTable");
+        printf("Finger table loaded successfully\n");
+        return 0;
+    }
+
+    // get_finger_entry <index>
+    if (strcmp(argv[1], "get_finger_entry") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Error: get_finger_entry requires index argument\n");
+            return 1;
+        }
+        
+        int index = atoi(argv[2]);
+        if (index < 0 || index >= NODE_ID_LENGTH) {
+            fprintf(stderr, "Error: index out of range [0, %d)\n", NODE_ID_LENGTH);
+            return 1;
+        }
+
+        FingerTableEntry* entry = &node->fingerTable[index];
+        int succ_id = (entry->successor != NULL) ? entry->successor->id : -1;
+        const char* succ_ip = (entry->Ip[0] != '\0') ? entry->Ip : "NONE";
+
+        printf("%d %d %d %d %d %s\n",
+               index,
+               entry->start,
+               entry->lowerIntervalLimit,
+               entry->upperIntervalLimit,
+               succ_id,
+               succ_ip);
+        return 0;
+    }
+
     return 0;
 }

@@ -570,3 +570,316 @@ void executeSSH(const char* ip, const char* command) {
 
     system(fullCommand);
 }
+
+/* ======================================================================
+   FINGER TABLE PERSISTENCE FUNCTIONS
+   - Save/load complete finger table to/from disk
+   - Allows finger table state to be preserved between sessions
+   ====================================================================== */
+
+void saveFingerTableToFile(Node* node, const char* filepath) {
+    if (!node) {
+        printf("Error: node is NULL\n");
+        return;
+    }
+
+    FILE* file = fopen(filepath, "w");
+    if (!file) {
+        printf("Error: cannot open file %s for writing\n", filepath);
+        return;
+    }
+
+    fprintf(file, "# Finger Table for Node %d\n", node->id);
+    fprintf(file, "# Format: entry=<idx>,start=<start>,lower=<lower>,upper=<upper>,successor_id=<id>,successor_ip=<ip>\n\n");
+
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        FingerTableEntry* entry = &node->fingerTable[i];
+        
+        int succ_id = (entry->successor != NULL) ? entry->successor->id : -1;
+        const char* succ_ip = (entry->successor != NULL && entry->Ip[0] != '\0') ? entry->Ip : "NONE";
+
+        fprintf(file, "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%s\n",
+                i,
+                entry->start,
+                entry->lowerIntervalLimit,
+                entry->upperIntervalLimit,
+                succ_id,
+                succ_ip);
+    }
+
+    fclose(file);
+    printf("[INFO] Finger table for node %d saved to %s\n", node->id, filepath);
+}
+
+void loadFingerTableFromFile(Node* node, const char* filepath) {
+    if (!node) {
+        printf("Error: node is NULL\n");
+        return;
+    }
+
+    FILE* file = fopen(filepath, "r");
+    if (!file) {
+        printf("Warning: cannot open file %s for reading, finger table will use defaults\n", filepath);
+        return;
+    }
+
+    char line[512];
+    int entry_idx = 0;
+
+    while (fgets(line, sizeof(line), file) && entry_idx < NODE_ID_LENGTH) {
+        // Skip comments and empty lines
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
+            continue;
+        }
+
+        int idx, start, lower, upper, succ_id;
+        char succ_ip[MAX_IP_LENGTH] = {0};
+
+        int parsed = sscanf(line, 
+                           "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%15s",
+                           &idx, &start, &lower, &upper, &succ_id, succ_ip);
+
+        if (parsed != 6) {
+            printf("Warning: skipping malformed line: %s\n", line);
+            continue;
+        }
+
+        // Validate entry index
+        if (idx < 0 || idx >= NODE_ID_LENGTH) {
+            printf("Warning: invalid entry index %d, skipping\n", idx);
+            continue;
+        }
+
+        node->fingerTable[idx].start = start;
+        node->fingerTable[idx].lowerIntervalLimit = lower;
+        node->fingerTable[idx].upperIntervalLimit = upper;
+
+        // Update successor reference
+        if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
+            // Reuse existing successor if IDs match, otherwise create new node
+            if (node->fingerTable[idx].successor == NULL || 
+                node->fingerTable[idx].successor->id != succ_id) {
+                if (node->fingerTable[idx].successor != NULL && 
+                    node->fingerTable[idx].successor != node) {
+                    freeNode(node->fingerTable[idx].successor);
+                }
+                node->fingerTable[idx].successor = createNode(succ_id, succ_ip, "");
+            }
+            strncpy(node->fingerTable[idx].Ip, succ_ip, MAX_IP_LENGTH - 1);
+            node->fingerTable[idx].Ip[MAX_IP_LENGTH - 1] = '\0';
+        } else {
+            // No valid successor, point to self
+            node->fingerTable[idx].successor = node;
+            node->fingerTable[idx].Ip[0] = '\0';
+        }
+
+        entry_idx++;
+    }
+
+    fclose(file);
+    printf("[INFO] Finger table for node %d loaded from %s\n", node->id, filepath);
+}
+
+void printFingerTable(Node* node) {
+    if (!node) {
+        printf("Error: node is NULL\n");
+        return;
+    }
+
+    printf("\n╔════════════════════════════════════════════════════════════╗\n");
+    printf("║         Finger Table for Node %d (IP: %s)          ║\n", node->id, node->Ip);
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+    printf("║ Idx │ Start │ Lower │ Upper │ Successor ID │ Successor IP  ║\n");
+    printf("╠════════════════════════════════════════════════════════════╣\n");
+
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        FingerTableEntry* entry = &node->fingerTable[i];
+        int succ_id = (entry->successor != NULL) ? entry->successor->id : -1;
+        const char* succ_ip = (entry->Ip[0] != '\0') ? entry->Ip : "N/A";
+
+        printf("║ %2d  │  %2d  │  %2d  │  %2d  │      %2d      │ %-13s ║\n",
+               i, entry->start, entry->lowerIntervalLimit, 
+               entry->upperIntervalLimit, succ_id, succ_ip);
+    }
+
+    printf("╚════════════════════════════════════════════════════════════╝\n\n");
+}
+
+/* ======================================================================
+   REMOTE FINGER TABLE OPERATIONS
+   - Query finger tables from remote nodes via SSH
+   - Rebuild complete finger table structures from remote data
+   ====================================================================== */
+
+void remote_print_finger_table(const char* ip) {
+    char command[256];
+    snprintf(command, sizeof(command),
+        "ssh %s \"./scripts/node_comms print_finger_table\" 2>/dev/null",
+        ip);
+
+    system(command);
+}
+
+void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
+    if (!node) {
+        printf("Error: node is NULL\n");
+        return;
+    }
+
+    printf("[INFO] Loading finger table from remote node at %s\n", remote_ip);
+
+    char command[512];
+    snprintf(command, sizeof(command),
+        "ssh %s \"cat nodeInfo/FingerTable 2>/dev/null\" 2>/dev/null",
+        remote_ip);
+
+    FILE* fp = popen(command, "r");
+    if (!fp) {
+        printf("Warning: could not connect to remote node at %s\n", remote_ip);
+        return;
+    }
+
+    char line[512];
+    int entry_idx = 0;
+
+    while (fgets(line, sizeof(line), fp) && entry_idx < NODE_ID_LENGTH) {
+        // Skip comments and empty lines
+        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
+            continue;
+        }
+
+        int idx, start, lower, upper, succ_id;
+        char succ_ip[MAX_IP_LENGTH] = {0};
+
+        int parsed = sscanf(line,
+                           "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%15s",
+                           &idx, &start, &lower, &upper, &succ_id, succ_ip);
+
+        if (parsed != 6) {
+            continue;
+        }
+
+        if (idx < 0 || idx >= NODE_ID_LENGTH) {
+            continue;
+        }
+
+        node->fingerTable[idx].start = start;
+        node->fingerTable[idx].lowerIntervalLimit = lower;
+        node->fingerTable[idx].upperIntervalLimit = upper;
+
+        if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
+            if (node->fingerTable[idx].successor == NULL ||
+                node->fingerTable[idx].successor->id != succ_id) {
+                if (node->fingerTable[idx].successor != NULL &&
+                    node->fingerTable[idx].successor != node) {
+                    freeNode(node->fingerTable[idx].successor);
+                }
+                node->fingerTable[idx].successor = createNode(succ_id, succ_ip, "");
+            }
+            strncpy(node->fingerTable[idx].Ip, succ_ip, MAX_IP_LENGTH - 1);
+            node->fingerTable[idx].Ip[MAX_IP_LENGTH - 1] = '\0';
+        } else {
+            node->fingerTable[idx].successor = node;
+            node->fingerTable[idx].Ip[0] = '\0';
+        }
+
+        entry_idx++;
+    }
+
+    pclose(fp);
+    printf("[INFO] Remote finger table loaded successfully\n");
+}
+
+/* ======================================================================
+   OPTIMIZED LOOKUP USING FINGER TABLES
+   - Uses finger tables for O(log n) instead of O(n) lookups
+   - Traverses nodes with finger table guidance
+   ====================================================================== */
+
+Node* find_successor_with_finger_table(Node* node, int id) {
+    if (!node) {
+        return NULL;
+    }
+
+    // Step 1: Quick local check - if id is in interval (node_id, successor_id]
+    if (node->successor != NULL && 
+        half_left_open_interval(id, node->id, node->successor->id)) {
+        return createNode(node->successor->id, node->successor->Ip, "");
+    }
+
+    // Step 2: Find closest preceding finger using the finger table
+    Node* cpf = closest_preceding_finger(node, id);
+    if (cpf == NULL) {
+        return node; // Fallback: return self
+    }
+
+    // Step 3: If local node is closest, proceed with regular lookup
+    if (cpf->id == node->id) {
+        return find_successor(node, id);
+    }
+
+    // Step 4: Remote lookup on the closest preceding finger
+    return remote_find_successor(cpf->Ip, id);
+}
+
+Node* find_predecessor_with_finger_table(Node* node, int id) {
+    if (!node || !node->successor) {
+        printf("Error: node or successor is NULL\n");
+        return NULL;
+    }
+
+    // Quick local check
+    if (id != node->id && 
+        half_left_open_interval(id, node->id, node->successor->id)) {
+        return createNode(node->id, node->Ip, "");
+    }
+
+    // Use finger table to navigate efficiently
+    Node* current = node;
+    Node* cpf = closest_preceding_finger(current, id);
+    
+    if (cpf == NULL) {
+        return NULL;
+    }
+
+    if (cpf->id == node->id) {
+        // Finger table points to self, use remote traversal
+        return find_predecessor(node, id);
+    }
+
+    // Perform remote lookup chain using finger table guidance
+    int max_hops = NODE_ID_LENGTH + 2; // Log(n) hops expected
+    
+    while (max_hops-- > 0) {
+        Node* next_cpf = remote_closest_preceding_finger(cpf->Ip, id);
+        
+        if (next_cpf == NULL) {
+            return cpf; // Return best guess so far
+        }
+
+        Node* succ = remote_get_successor(cpf->Ip);
+        if (succ == NULL) {
+            freeNode(next_cpf);
+            return cpf;
+        }
+
+        // Check if predecessor found
+        if (half_left_open_interval(id, cpf->id, succ->id)) {
+            freeNode(next_cpf);
+            freeNode(succ);
+            return cpf;
+        }
+
+        freeNode(succ);
+        
+        // Move to next node indicated by finger table
+        if (next_cpf->id != cpf->id && cpf != node) {
+            freeNode(cpf);
+        }
+        
+        cpf = next_cpf;
+    }
+
+    printf("Warning: max hops reached in find_predecessor_with_finger_table\n");
+    return cpf;
+}
