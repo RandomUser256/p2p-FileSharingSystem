@@ -1,7 +1,7 @@
 # Finger Table for Node 4
 # Format: entry=<idx>,start=<start>,lower=<lower>,upper=<upper>,successor_id=<id>,successor_ip=<ip>
 
-entry=0,start=5,lower=5,upper=6,successor_id=5,successor_ip=10.11.20.41
-entry=1,start=6,lower=6,upper=8,successor_id=6,successor_ip=10.11.20.42
+entry=0,start=5,lower=5,upper=6,successor_id=-351034992,successor_ip=10.11.20.41
+entry=1,start=6,lower=6,upper=8,successor_id=-351034992,successor_ip=10.11.20.42
 entry=2,start=8,lower=8,upper=12,successor_id=4,successor_ip=10.11.20.40
 entry=3,start=12,lower=12,upper=4,successor_id=4,successor_ip=10.11.20.40

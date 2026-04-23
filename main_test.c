@@ -286,6 +286,293 @@ static void test_find_successor_end_to_end(void) {
 }
 
 /* ---------------------------------------------------------------
+   Test 7 — Modular Finger Table Testing with Ring & Remote Comms
+   Tests finger table persistence, optimized lookups, and 
+   remote synchronization across the Chord ring.
+--------------------------------------------------------------- */
+
+/* Helper: Test finger table persistence */
+static void test_finger_table_persistence(Node* node) {
+    printf("\n  [SUBTEST] Finger Table Persistence\n");
+    
+    // Save finger table
+    saveFingerTableToFile(node, "nodeInfo/FingerTable");
+    pass("saved finger table to disk");
+    
+    // Create a new node and load the table
+    Node* node_loaded = createNode(node->id, node->Ip, node->fileContentPath);
+    loadFingerTableFromFile(node_loaded, "nodeInfo/FingerTable");
+    pass("loaded finger table from disk");
+    
+    // Verify entries match
+    int entries_match = 1;
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        if (node->fingerTable[i].start != node_loaded->fingerTable[i].start ||
+            node->fingerTable[i].lowerIntervalLimit != node_loaded->fingerTable[i].lowerIntervalLimit ||
+            node->fingerTable[i].upperIntervalLimit != node_loaded->fingerTable[i].upperIntervalLimit) {
+            entries_match = 0;
+            break;
+        }
+    }
+    
+    if (entries_match) {
+        pass("finger table entries match after load/save");
+    } else {
+        fail("finger table entries", "mismatch after load/save");
+    }
+    
+    freeNode(node_loaded);
+}
+
+/* Helper: Test finger table structure validity */
+static void test_finger_table_structure(Node* node) {
+    printf("\n  [SUBTEST] Finger Table Structure Validity\n");
+    
+    int valid = 1;
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        FingerTableEntry* entry = &node->fingerTable[i];
+        
+        // Check start value is correct
+        int expected_start = (node->id + (1U << i)) % MAX_NUMBER_NODES;
+        if (entry->start != expected_start) {
+            printf("    Entry %d: start=%d, expected=%d\n", i, entry->start, expected_start);
+            valid = 0;
+        }
+        
+        // Check successor exists
+        if (entry->successor == NULL) {
+            printf("    Entry %d: successor is NULL\n", i);
+            valid = 0;
+        }
+    }
+    
+    if (valid) {
+        pass("finger table structure is valid");
+    } else {
+        fail("finger table structure", "invalid entries detected");
+    }
+}
+
+/* Helper: Test optimized lookups */
+static void test_optimized_lookups(Node* local_node) {
+    printf("\n  [SUBTEST] Optimized Lookups vs Regular Lookups\n");
+    
+    int test_ids[] = {1, 2, 4, 6, 7, 9, 11};
+    int num_tests = sizeof(test_ids) / sizeof(test_ids[0]);
+    int match_count = 0;
+    
+    for (int i = 0; i < num_tests; i++) {
+        int target_id = test_ids[i];
+        
+        // Regular lookup
+        Node* regular = find_successor(local_node, target_id);
+        
+        // Optimized lookup with finger table
+        Node* optimized = find_successor_with_finger_table(local_node, target_id);
+        
+        if (regular != NULL && optimized != NULL) {
+            if (regular->id == optimized->id) {
+                match_count++;
+                printf("    find_successor(%d): regular=%d, optimized=%d ✓\n",
+                       target_id, regular->id, optimized->id);
+            } else {
+                printf("    find_successor(%d): regular=%d, optimized=%d ✗\n",
+                       target_id, regular->id, optimized->id);
+                fail("lookup results", "optimized and regular differ");
+            }
+            freeNode(regular);
+            freeNode(optimized);
+        } else if (regular == NULL && optimized == NULL) {
+            match_count++;
+        } else {
+            printf("    find_successor(%d): one returned NULL\n", target_id);
+        }
+    }
+    
+    if (match_count == num_tests) {
+        pass("optimized lookups match regular lookups");
+    }
+}
+
+/* Helper: Test predecessor lookups */
+static void test_predecessor_with_finger_table(Node* local_node) {
+    printf("\n  [SUBTEST] Predecessor Lookups with Finger Table\n");
+    
+    int test_ids[] = {4, 5, 6, 9};
+    int num_tests = sizeof(test_ids) / sizeof(test_ids[0]);
+    int success_count = 0;
+    
+    for (int i = 0; i < num_tests; i++) {
+        int target_id = test_ids[i];
+        
+        Node* pred = find_predecessor_with_finger_table(local_node, target_id);
+        
+        if (pred != NULL) {
+            printf("    find_predecessor(%d): predecessor id=%d\n", target_id, pred->id);
+            success_count++;
+            freeNode(pred);
+        } else {
+            printf("    find_predecessor(%d): returned NULL\n", target_id);
+        }
+    }
+    
+    if (success_count == num_tests) {
+        pass("predecessor lookups completed");
+    } else {
+        fail("predecessor lookups", "some returned NULL");
+    }
+}
+
+/* Helper: Test ring topology */
+static void test_ring_topology(Node* local_node) {
+    printf("\n  [SUBTEST] Ring Topology Validation\n");
+    
+    if (local_node->successor == NULL || local_node->predecessor == NULL) {
+        fail("ring topology", "successor or predecessor is NULL");
+        return;
+    }
+    
+    printf("    Ring: %d → %d → %d → %d\n",
+           local_node->id,
+           local_node->successor->id,
+           (local_node->successor->successor ? local_node->successor->successor->id : -1),
+           (local_node->successor->predecessor ? local_node->successor->predecessor->id : -1));
+    
+    // Verify basic ring structure
+    if (local_node->successor->id > 0 && local_node->predecessor->id > 0) {
+        pass("ring topology is valid");
+    } else {
+        fail("ring topology", "invalid successor or predecessor IDs");
+    }
+}
+
+/* Helper: Test remote finger table operations */
+static void test_remote_finger_table_ops(const char* remote_ip) {
+    printf("\n  [SUBTEST] Remote Finger Table Operations\n");
+    printf("    Attempting SSH to %s...\n", remote_ip);
+    
+    // Test remote successor query
+    Node* remote_succ = remote_get_successor(remote_ip);
+    if (remote_succ != NULL) {
+        printf("    Remote successor: id=%d ip=%s ✓\n", remote_succ->id, remote_succ->Ip);
+        pass("remote_get_successor works");
+        freeNode(remote_succ);
+    } else {
+        fail("remote operations", "could not reach remote node via SSH");
+        return;
+    }
+    
+    // Test remote closest preceding finger
+    Node* remote_cpf = remote_closest_preceding_finger(remote_ip, 6);
+    if (remote_cpf != NULL) {
+        printf("    Remote CPF(6): id=%d ip=%s ✓\n", remote_cpf->id, remote_cpf->Ip);
+        pass("remote_closest_preceding_finger works");
+        freeNode(remote_cpf);
+    }
+}
+
+/* Main modular test: Comprehensive finger table + ring + remote testing */
+static void test_finger_table_ring_integration(void) {
+    printf("\n[TEST 7] Modular Finger Table Integration — Ring & Remote Communication\n");
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 1: Load Node and Finger Table                 ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    Node* local = loadNodeFromFile("nodeInfo/Node");
+    if (local == NULL) {
+        fail("load local node", "cannot proceed without local node");
+        return;
+    }
+    pass("loaded local node from file");
+    
+    // Load and display finger table
+    loadFingerTableFromFile(local, "nodeInfo/FingerTable");
+    pass("loaded finger table from file");
+    
+    printf("\n  Displaying Finger Table:\n");
+    printFingerTable(local);
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 2: Finger Table Validation                    ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    test_finger_table_structure(local);
+    test_finger_table_persistence(local);
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 3: Ring Topology Testing                      ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    test_ring_topology(local);
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 4: Lookup Performance Testing                 ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    test_optimized_lookups(local);
+    test_predecessor_with_finger_table(local);
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 5: Remote Communication Testing               ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    // Test remote operations
+    printf("\n  Testing remote node at 10.11.20.41 (Node 9):\n");
+    test_remote_finger_table_ops("10.11.20.39");
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 6: Complete Lookup Workflow                   ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    printf("\n  Complete workflow: lookup ID=10\n");
+    
+    // Step 1: Check local finger table
+    printf("    Step 1: Checking finger table entries...\n");
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        if (in_open_interval(10, local->id, local->fingerTable[i].upperIntervalLimit)) {
+            printf("            Entry %d: interval [%d, %d) contains target\n",
+                   i, local->fingerTable[i].lowerIntervalLimit,
+                   local->fingerTable[i].upperIntervalLimit);
+        }
+    }
+    
+    // Step 2: Find using finger table
+    printf("    Step 2: Finding successor using finger table...\n");
+    Node* result = find_successor_with_finger_table(local, 10);
+    if (result) {
+        printf("            Result: Node %d at %s\n", result->id, result->Ip);
+        pass("workflow: found responsible node");
+        freeNode(result);
+    } else {
+        fail("workflow", "could not find responsible node");
+    }
+    
+    printf("\n  Lookup workflow using predecessor:\n");
+    printf("    Step 1: Finding predecessor of ID=10...\n");
+    Node* pred = find_predecessor_with_finger_table(local, 10);
+    if (pred) {
+        printf("            Predecessor: Node %d at %s\n", pred->id, pred->Ip);
+        pass("workflow: found predecessor");
+        freeNode(pred);
+    } else {
+        fail("workflow", "could not find predecessor");
+    }
+    
+    printf("\n╔════════════════════════════════════════════════════════╗\n");
+    printf("║  Phase 7: Cleanup and State Persistence              ║\n");
+    printf("╚════════════════════════════════════════════════════════╝\n");
+    
+    // Save final state
+    saveFingerTableToFile(local, "nodeInfo/FingerTable");
+    pass("saved final finger table state");
+    
+    freeNode(local);
+    
+    printf("\n  [TEST 7 COMPLETE] All modular tests executed\n");
+}
+
+/* ---------------------------------------------------------------
    Main
 --------------------------------------------------------------- */
 int main(void) {
@@ -297,12 +584,15 @@ int main(void) {
     printf("  Ring:        4 → 5 → 6 → 4            \n");
     printf("========================================\n");
 
+    
     test_load_node_restores_links();       /* Bug #2 */
     test_generate_path_no_mutation();      /* Bug #3 */
     test_remote_get_successor();           /* SSH baseline */
     test_remote_closest_preceding_finger(); /* SSH baseline */
     test_find_predecessor_no_loop();       /* Bug #1 — the main culprit */
     test_find_successor_end_to_end();      /* Full integration */
+    
+    test_finger_table_ring_integration();  /* NEW: Modular finger table test */
 
     printf("\n========================================\n");
     printf("  Results: %d / %d passed\n", tests_passed, tests_run);

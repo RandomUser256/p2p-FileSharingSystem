@@ -571,11 +571,10 @@ void executeSSH(const char* ip, const char* command) {
     system(fullCommand);
 }
 
-/* ======================================================================
-   FINGER TABLE PERSISTENCE FUNCTIONS
-   - Save/load complete finger table to/from disk
-   - Allows finger table state to be preserved between sessions
-   ====================================================================== */
+/*
+   FINGER TABLE PERSISTENCE 
+   - Save/load finger table to/from disk
+*/
 
 void saveFingerTableToFile(Node* node, const char* filepath) {
     if (!node) {
@@ -655,6 +654,7 @@ void loadFingerTableFromFile(Node* node, const char* filepath) {
         node->fingerTable[idx].upperIntervalLimit = upper;
 
         // Update successor reference
+        //Checks if successor ID and IP are valid before updating the finger table entry
         if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
             // Reuse existing successor if IDs match, otherwise create new node
             if (node->fingerTable[idx].successor == NULL || 
@@ -705,12 +705,10 @@ void printFingerTable(Node* node) {
     printf("╚════════════════════════════════════════════════════════════╝\n\n");
 }
 
-/* ======================================================================
-   REMOTE FINGER TABLE OPERATIONS
+/* REMOTE FINGER TABLE OPERATIONS
    - Query finger tables from remote nodes via SSH
-   - Rebuild complete finger table structures from remote data
-   ====================================================================== */
-
+   - Rebuild complete finger table structures from remote machine
+*/
 void remote_print_finger_table(const char* ip) {
     char command[256];
     snprintf(command, sizeof(command),
@@ -767,7 +765,10 @@ void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
         node->fingerTable[idx].lowerIntervalLimit = lower;
         node->fingerTable[idx].upperIntervalLimit = upper;
 
+        // Update successor reference
+        //Checks if successor ID and IP are valid before updating the finger table entry
         if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
+            // Reuse existing successor if IDs match, otherwise create new node
             if (node->fingerTable[idx].successor == NULL ||
                 node->fingerTable[idx].successor->id != succ_id) {
                 if (node->fingerTable[idx].successor != NULL &&
@@ -810,10 +811,10 @@ Node* find_successor_with_finger_table(Node* node, int id) {
     // Step 2: Find closest preceding finger using the finger table
     Node* cpf = closest_preceding_finger(node, id);
     if (cpf == NULL) {
-        return node; // Fallback: return self
+        return node; // return self if non valid finger found
     }
 
-    // Step 3: If local node is closest, proceed with regular lookup
+    // Step 3: If local node is closest preceding node, proceed with regular lookup
     if (cpf->id == node->id) {
         return find_successor(node, id);
     }
@@ -831,6 +832,7 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
     // Quick local check
     if (id != node->id && 
         half_left_open_interval(id, node->id, node->successor->id)) {
+        //Return self in case of being the predecessor fo Target ID 
         return createNode(node->id, node->Ip, "");
     }
 
