@@ -1,13 +1,6 @@
-#include <stdio.h>
-#include <stdbool.h>
-
-#include <errno.h>
-#include <stdlib.h>
-#include <string.h>
-#include <math.h>
-
+#include "DHASH.h"
 //Cambiar a header file
-#include "node.c"
+#include "maintenance.h"
 
 /*
 Pending changes:
@@ -190,13 +183,4 @@ Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     return createNode(id, remoteIp, "");
 }
 
-//Ip of host node where stabilize is called 
-Node* remote_stabilize(const char* ip) {
-    char command[256];
-
-    snprintf(command, sizeof(command),
-        "ssh %s \"./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
-        ip,
-        targetId
-    );
-}
+// remote_stabilize is now defined in node.c with proper implementation

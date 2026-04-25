@@ -4,8 +4,16 @@
 
 #include "../src/DHASH.c"
 
-// Called from another node to read the contents of the node it's accessing
+// Called from another node to read the contents of the node it's accessing (which is the local node running this script at a given time))
 // Basically communication to traverse the ring
+
+//Always provided an IP address of the node to query, and the ID of the target node for the query when applicable
+
+/*
+TODO
+    - Check that remote join links predecessors and successors correctly
+        - Maybe the predecessor of the local node is being incorrectly updated
+*/
 
 int main(int argc, char* argv[]) {
 
@@ -79,6 +87,26 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+    //check Chord ring integrity remotely
+    //only checks local node's successor and predecessor links, but can be called on each node in the ring to verify overall integrity
+    // Returns node's ID and IP if check passes, must be called recursively to check the whole ring
+    if (strcmp(argv[1], "check_ring") == 0) {
+        if (node->successor->predecessor != node) {
+            printf("ERROR: successor->predecessor mismatch at node %d\n", node->id);
+            return -1;
+        }
+        if (node->predecessor->successor != node) {
+            printf("ERROR: predecessor->successor mismatch at node %d\n", node->id);
+            return -1;
+        }
+
+        /*
+        char result[50];
+        snprintf(result, sizeof(result), "%d %s\n", node->id, node->Ip);
+        */
+        return node->id; // Return ID to indicate success
+    }
+
     // get_finger_entry <index>
     if (strcmp(argv[1], "get_finger_entry") == 0) {
         if (argc < 3) {
@@ -106,34 +134,89 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    //Stabilize
-    if (strcmp(argv[1], "stabilize") == 0) {
-        if(argc < 3) {
-            fprintf(stderr, "Error, not enough arguments in the call");
+    // notify <predecessor_id> <predecessor_ip>
+    // Updates local node's predecessor and saves to disk
+    if (strcmp(argv[1], "notify") == 0) {
+        if (argc < 4) {
+            fprintf(stderr, "Error: notify requires predecessor_id and predecessor_ip\n");
             return 1;
         }
 
-        int targetId = atoi(argv[2]);
+        int pred_id = atoi(argv[2]);
+        const char* pred_ip = argv[3];
 
-        Node* predecessor = remote_closest_preceding_finger(node->Ip, node->id);
-        //Node* predecessor = node->predecessor;
-
-        Node* successor = remote_find_successor(node->Ip, )
-
-        if (in_open_interval(predecessor->id, node->id, node->successor->id)) {
-            node->successor = predecessor;
+        if (node->predecessor == NULL || 
+            in_open_interval(pred_id, node->predecessor->id, node->id)) {
+            
+            // Update predecessor
+            if (node->predecessor != NULL) {
+                freeNode(node->predecessor);
+            }
+            node->predecessor = createNode(pred_id, pred_ip, "");
+            
+            // Save changes to disk
+            saveNodeToFile(node, "nodeInfo/Node");
+            
+            printf("[INFO] Predecessor updated to Node %d (IP: %s)\n", pred_id, pred_ip);
         }
-
-        //NOTIFY phase
-        Node* succPred = find_predecessor(node, node->successor->id)
-
-
-        if (predecessor == NULL || in_open_interval(node->id, predecessor->id, node->successor->id)) {
-            predecessor = node;
-        }
-
         return 0;
     }
+
+    // stabilize - Performs stabilization on local node
+    if (strcmp(argv[1], "stabilize") == 0) {
+        if (!node->successor) {
+            fprintf(stderr, "Error: Node has no successor\n");
+            return 1;
+        }
+
+        // Get successor's predecessor
+        Node* x = remote_get_successor(node->successor->Ip);
+        if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
+            node->successor = x;
+            saveNodeToFile(node, "nodeInfo/Node");
+            printf("[INFO] Updated successor to Node %d\n", x->id);
+        }
+
+        // Notify successor about this node
+        printf("[INFO] Notifying successor Node %d about Node %d\n", 
+               node->successor->id, node->id);
+        
+        if (x != NULL) {
+            freeNode(x);
+        }
+        return 0;
+    }
+
+    //join - Remotely sync predecessor and successor links with another node in the ring, used when joining an existing ring
+    //Meant to be sent from new node to an existing node
+    if (strcmp(argv[1], "join") == 0) {
+        if (argc < 3) {
+            fprintf(stderr, "Error: join requires target node IP\n");
+            return 1;
+        }
+
+        //Consults the IP of the machine that wishes to join the ring, recreates the node structure of the target
+        const char* target_ip = argv[2];
+        Node* target_node = remote_get_successor(target_ip); // Get successor of target node to find correct position in ring
+
+        if (target_node == NULL) {
+            fprintf(stderr, "Error: Could not contact target node at %s\n", target_ip);
+            return 1;
+        }
+
+        // Update local node's successor and predecessor based on target node's successor
+        node->successor = createNode(target_node->id, target_node->Ip, "");
+        node->predecessor = createNode(target_node->predecessor->id, target_node->predecessor->Ip, "");
+
+        // Save changes to disk
+        saveNodeToFile(node, "nodeInfo/Node");
+
+        printf("[INFO] Joined ring via Node %d (IP: %s)\n", target_node->id, target_node->Ip);
+        
+        freeNode(target_node);
+        return 0;
+    }
+
 
     return 0;
 }
