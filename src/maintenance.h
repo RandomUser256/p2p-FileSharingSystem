@@ -5,6 +5,14 @@
 #include <time.h>
 #include "node.h"
 
+/*
+//Forward declaration of struct
+struct Node; 
+
+// 2. Map the typedef (if the original was "typedef struct Node Node")
+typedef struct Node Node;
+*/
+
 typedef struct {
     Node* node;
     int stabilize_interval_ms;    // milliseconds between stabilize calls

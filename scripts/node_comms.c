@@ -2,7 +2,8 @@
 #include <stdlib.h> 
 #include <string.h>
 
-#include "../src/DHASH.c"
+#include "../src/DHASH.h"
+#include "../src/logger.h"
 
 // Called from another node to read the contents of the node it's accessing (which is the local node running this script at a given time))
 // Basically communication to traverse the ring
@@ -14,6 +15,8 @@ TODO
     - Check that remote join links predecessors and successors correctly
         - Maybe the predecessor of the local node is being incorrectly updated
 */
+
+// Compiling commnad: gcc node_comms.c ../src/DHASH.c ../src/logger.c ../src/node.c -Wall -o node_comms -lm
 
 int main(int argc, char* argv[]) {
 
@@ -76,14 +79,14 @@ int main(int argc, char* argv[]) {
     // save_finger_table
     if (strcmp(argv[1], "save_finger_table") == 0) {
         saveFingerTableToFile(node, "nodeInfo/FingerTable");
-        printf("Finger table saved successfully\n");
+        log_info("[INFO] Finger table saved successfully\n");
         return 0;
     }
 
     // load_finger_table
     if (strcmp(argv[1], "load_finger_table") == 0) {
         loadFingerTableFromFile(node, "nodeInfo/FingerTable");
-        printf("Finger table loaded successfully\n");
+        log_info("[INFO] Finger table loaded successfully\n");
         return 0;
     }
 
@@ -92,11 +95,11 @@ int main(int argc, char* argv[]) {
     // Returns node's ID and IP if check passes, must be called recursively to check the whole ring
     if (strcmp(argv[1], "check_ring") == 0) {
         if (node->successor->predecessor != node) {
-            printf("ERROR: successor->predecessor mismatch at node %d\n", node->id);
+            log_error("ERROR: successor->predecessor mismatch at node %d\n", node->id);
             return -1;
         }
         if (node->predecessor->successor != node) {
-            printf("ERROR: predecessor->successor mismatch at node %d\n", node->id);
+            log_error("ERROR: predecessor->successor mismatch at node %d\n", node->id);
             return -1;
         }
 
@@ -157,7 +160,7 @@ int main(int argc, char* argv[]) {
             // Save changes to disk
             saveNodeToFile(node, "nodeInfo/Node");
             
-            printf("[INFO] Predecessor updated to Node %d (IP: %s)\n", pred_id, pred_ip);
+            log_info("[INFO] Predecessor updated to Node %d (IP: %s)\n", pred_id, pred_ip);
         }
         return 0;
     }
@@ -174,12 +177,12 @@ int main(int argc, char* argv[]) {
         if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
             node->successor = x;
             saveNodeToFile(node, "nodeInfo/Node");
-            printf("[INFO] Updated successor to Node %d\n", x->id);
+            log_info("[INFO] Updated successor to Node %d\n", x->id);
         }
 
         // Notify successor about this node
-        printf("[INFO] Notifying successor Node %d about Node %d\n", 
-               node->successor->id, node->id);
+        log_info("[INFO] Notifying successor Node %d about Node %d\n", 
+                  node->successor->id, node->id);
         
         if (x != NULL) {
             freeNode(x);
@@ -211,7 +214,7 @@ int main(int argc, char* argv[]) {
         // Save changes to disk
         saveNodeToFile(node, "nodeInfo/Node");
 
-        printf("[INFO] Joined ring via Node %d (IP: %s)\n", target_node->id, target_node->Ip);
+        log_info("[INFO] Joined ring via Node %d (IP: %s)\n", target_node->id, target_node->Ip);
         
         freeNode(target_node);
         return 0;

@@ -1,6 +1,7 @@
 #include "DHASH.h"
+#include "logger.h"
 //Cambiar a header file
-#include "maintenance.h"
+//#include "maintenance.h"
 
 /*
 Pending changes:
@@ -10,7 +11,7 @@ Pending changes:
 */
 
 // DISCLAIMER: In this function change arguments to incorporate appropriate hashing of files
-Node* lookup(Node* node, /*char* identifier*/ int identifier) {
+Node* lookup(Node* node, int identifier) {
     //Hash the identifier to get the corresponding node ID
     //int nodeId = hash(identifier);
 
@@ -20,7 +21,7 @@ Node* lookup(Node* node, /*char* identifier*/ int identifier) {
     if (responsibleNode != NULL) {
         return responsibleNode;
     } else {
-        printf("No responsible node found for identifier. Value of errno: %d\n", errno);
+        log_error("No responsible node found for identifier. Value of errno: %d\n", errno);
         return NULL;
     }
 }
@@ -32,7 +33,7 @@ char* generateDestinationFilePath(Node* destinationNode, char* identifier) {
                            destinationNode->fileContentPath,
                            identifier);
     if (written < 0 || written >= MAX_FILE_PATH_LENGTH) {
-        printf("Error: Destination file path exceeds maximum length.\n");
+        log_error("Error: Destination file path exceeds maximum length.\n");
         return NULL;
     }
     return destinationFilePath;
@@ -46,7 +47,7 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
     Node* destinationNode = lookup(hostNode, destinationNodeId);
 
     if(destinationNode == NULL) {
-        printf("Error: Destination node not found\n");
+        log_error("Error: Destination node not found\n");
         return;
     }
 
@@ -59,7 +60,7 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
     strncat(destinationFilePath, "/", MAX_FILE_PATH_LENGTH - strlen(destinationFilePath) - 1);
     strncat(destinationFilePath, identifier, MAX_FILE_PATH_LENGTH - strlen(destinationFilePath) - 1);
 
-    printf("Copying file to node %d (%s)\n",
+    log_info("Copying file to node %d (%s)\n",
            destinationNode->id,
            destinationNode->Ip); 
     //SCP COMMAND
@@ -67,14 +68,14 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
 
     sprintf(command, "scp %s %s:%s", sourceFilePath, destinationNode->Ip, destinationFilePath);
 
-    printf("Executing: %s\n", command);
+    log_info("Executing: %s\n", command);
 
     int result = system(command);
 
     if(result != 0) {
-        printf("Error: SCP failed\n");
+        log_error("Error: SCP failed\n");
     } else {
-        printf("File transferred successfully\n");
+        log_info("File transferred successfully\n");
     }
 }
 
@@ -90,7 +91,7 @@ Node* remote_find_successor(const char* ip, int targetId) {
     FILE* fp = popen(command, "r");
 
     if (!fp) {
-        printf("SSH failed\n");
+        log_error("SSH failed\n");
         return NULL;
     }
 
@@ -107,7 +108,7 @@ Node* remote_find_successor(const char* ip, int targetId) {
     char remoteIp[16];
 
     if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
-        printf("Invalid response: %s\n", line);
+        log_error("Invalid response: %s\n", line);
         pclose(fp);
         return NULL;
     }

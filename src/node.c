@@ -7,7 +7,8 @@
 #include <time.h>
 
 #include "node.h"
-#include "DHASH.h"
+#include "logger.h"
+//#include "DHASH.h"
 
 /*
 TODO:
@@ -22,11 +23,12 @@ ERRORS
     - When looking for the successor of an ID that is active in the ring, it returns that same ID instead of its successor 
 */
 
-
+/*
 #define MAX_IP_LENGTH 16
 #define MAX_FILE_PATH_LENGTH 256
 #define NODE_ID_LENGTH 4 //in bits, equal to 16 total nodes
 #define MAX_NUMBER_NODES (1U << NODE_ID_LENGTH) //Maximum number of nodes in the network
+*/
 
 int in_open_interval(int id, int start, int end) {
     if (start < end)
@@ -270,12 +272,17 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     return node; // If no successor is found in the finger table, return the current node
 }
 
-/*
+
 Node* remote_find_successor(const char* ip, int targetId);
 Node* remote_get_successor(const char* ip);
 Node* remote_closest_preceding_finger(const char* ip, int targetId);
-void freeNode(Node* node);
-*/
+
+void freeNode(Node* node) {
+    if (node != NULL) {
+        free(node);
+    }
+}
+
 /*
 Node* find_predecessor(Node* node, int targetId) {
     if (!node) {
@@ -555,7 +562,7 @@ void notify(Node* node, Node* potentialPredecessor) {
         
         // Save the updated node state to disk
         saveNodeToFile(node, "nodeInfo/Node");
-        printf("[INFO] Node %d predecessor updated to Node %d, saved to disk\n", 
+        log_info("[INFO] Node %d predecessor updated to Node %d, saved to disk\n", 
                node->id, potentialPredecessor->id);
     }
 }
@@ -572,37 +579,31 @@ void stabilize(Node* node) {
     if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
         node->successor = x;
         saveNodeToFile(node, "nodeInfo/Node");
-        printf("[INFO] Node %d successor updated to Node %d, saved to disk\n", 
-               node->id, x->id);
+        log_info("[INFO] Node %d successor updated to Node %d, saved to disk\n", 
+                  node->id, x->id);
     }
 
     notify(node->successor, node); // Notify the successor about the current node as a potential predecessor
-}
-
-void freeNode(Node* node) {
-    if (node != NULL) {
-        free(node);
-    }
 }
 
 //Troublshooting functions
 
 void nodePrint(Node* node) {
     if (node == NULL) {
-        printf("Node is NULL.\n");
+        log_info("[INFO] Node is NULL.\n");
         return;
     }
-    printf("Node ID: %d\n", node->id);
-    printf("Node IP: %s\n", node->Ip);
+    log_info("[INFO] Node ID: %d\n", node->id);
+    log_info("[INFO] Node IP: %s\n", node->Ip);
     if (node->successor != NULL) {
-        printf("Node Succesor ID: %d\n", node->successor->id);
+        log_info("[INFO] Node Successor ID: %d\n", node->successor->id);
     } else {
-        printf("Node Succesor: NULL\n");
+        log_info("[INFO] Node Successor: NULL\n");
     }
     if (node->fileContentPath[0] != '\0') {
-        printf("Node File Content Path: %s\n", node->fileContentPath);
+        log_info("[INFO] Node File Content Path: %s\n", node->fileContentPath);
     } else {
-        printf("Node File Content Path: None\n");
+        log_info("[INFO] Node File Content Path: None\n");
     }
 }
 
@@ -622,10 +623,10 @@ void check_ring(Node* start) {
 
     do {
         if (curr->successor->predecessor != curr) {
-            printf("ERROR: successor->predecessor mismatch at node %d\n", curr->id);
+            log_error("[ERROR] successor->predecessor mismatch at node %d\n", curr->id);
         }
         if (curr->predecessor->successor != curr) {
-            printf("ERROR: predecessor->successor mismatch at node %d\n", curr->id);
+            log_error("[ERROR] predecessor->successor mismatch at node %d\n", curr->id);
         }
 
         curr = curr->successor;
@@ -650,13 +651,13 @@ void remote_check_ring(Node* start, const char* ip) {
         ringId = system(command); // Execute the command and capture the return value (ring ID)
 
         if (ringId == -1) {
-            printf("Ring check failed for node %d at IP %s\n", ringId, ip);
+            log_error("[ERROR] Ring check failed for node %d at IP %s\n", ringId, ip);
             break;
         }
 
         //sscanf(result, "%d %15s", &ringId, ringIp); // Parse the result to extract the ring ID and IP address
 
-        printf("Ring check passed for node %d %s\n", ringId, ringIp);
+        log_info("[INFO] Ring check passed for node %d %s\n", ringId, ringIp);
 
         ringIp = start->successor->Ip; // Move to the next node in the ring using the successor's IP address
     }
@@ -668,7 +669,7 @@ void executeSSH(const char* ip, const char* command) {
 
     sprintf(fullCommand, "ssh %s \"%s\"", ip, command);
 
-    printf("SSH EXEC: %s\n", fullCommand);
+    log_info("[INFO] SSH EXEC: %s\n", fullCommand);
 
     system(fullCommand);
 }
@@ -709,18 +710,18 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
     }
 
     fclose(file);
-    printf("[INFO] Finger table for node %d saved to %s\n", node->id, filepath);
+    log_info("[INFO] Finger table for node %d saved to %s\n", node->id, filepath);
 }
 
 void loadFingerTableFromFile(Node* node, const char* filepath) {
     if (!node) {
-        printf("Error: node is NULL\n");
+        log_error("[ERROR] Error: node is NULL\n");
         return;
     }
 
     FILE* file = fopen(filepath, "r");
     if (!file) {
-        printf("Warning: cannot open file %s for reading, finger table will use defaults\n", filepath);
+        log_warn("[WARNING] cannot open file %s for reading, finger table will use defaults\n", filepath);
         return;
     }
 
@@ -741,13 +742,13 @@ void loadFingerTableFromFile(Node* node, const char* filepath) {
                            &idx, &start, &lower, &upper, &succ_id, succ_ip);
 
         if (parsed != 6) {
-            printf("Warning: skipping malformed line: %s\n", line);
+            log_warn("[WARNING] skipping malformed line: %s\n", line);
             continue;
         }
 
         // Validate entry index
         if (idx < 0 || idx >= NODE_ID_LENGTH) {
-            printf("Warning: invalid entry index %d, skipping\n", idx);
+            log_warn("[WARNING] invalid entry index %d, skipping\n", idx);
             continue;
         }
 
@@ -779,12 +780,12 @@ void loadFingerTableFromFile(Node* node, const char* filepath) {
     }
 
     fclose(file);
-    printf("[INFO] Finger table for node %d loaded from %s\n", node->id, filepath);
+    log_info("[INFO] Finger table for node %d loaded from %s\n", node->id, filepath);
 }
 
 void printFingerTable(Node* node) {
     if (!node) {
-        printf("Error: node is NULL\n");
+        log_error("[ERROR] Error: node is NULL\n");
         return;
     }
 
@@ -927,7 +928,7 @@ Node* find_successor_with_finger_table(Node* node, int id) {
 
 Node* find_predecessor_with_finger_table(Node* node, int id) {
     if (!node || !node->successor) {
-        printf("Error: node or successor is NULL\n");
+        log_error("[ERROR] find_predecessor_with_finger_table: Node or successor is NULL\n");
         return NULL;
     }
 
@@ -984,7 +985,7 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
         cpf = next_cpf;
     }
 
-    printf("Warning: max hops reached in find_predecessor_with_finger_table\n");
+    log_warn("[WARN] Max hops reached in find_predecessor_with_finger_table\n");
     return cpf;
 }
 
@@ -993,7 +994,7 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
    Sends predecessor info to remote node which updates and saves its predecessor */
 void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
     if (!remote_ip || !potentialPredecessor) {
-        printf("[ERROR] remote_notify: Invalid parameters\n");
+        log_error("[ERROR] remote_notify: Invalid parameters\n");
         return;
     }
 
@@ -1001,32 +1002,32 @@ void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
     snprintf(command, sizeof(command),
         "ssh %s 'cd %s && ./node_comms notify %d %s'",
         remote_ip,
-        "/path/to/project",  // This should be configurable
+        "scripts",  // This should be configurable
         potentialPredecessor->id,
         potentialPredecessor->Ip);
 
-    printf("[INFO] Notifying node at %s about predecessor %d\n", 
-           remote_ip, potentialPredecessor->id);
+    log_info("[INFO] Notifying node at %s about predecessor %d\n", 
+             remote_ip, potentialPredecessor->id);
 
     int result = system(command);
     if (result != 0) {
-        printf("[WARN] Remote notify to %s failed (may be unreachable)\n", remote_ip);
+        log_warn("[WARN] Remote notify to %s failed (may be unreachable)\n", remote_ip);
     }
 }
 
 //Uses remote communication to obtain the successor of local node with remote nodes and perform stabilization based on that information
 void remote_stabilize(Node *node) {
     if (!node || !node->successor) {
-        printf("[ERROR] remote_stabilize: Node or successor is NULL\n");
+        log_error("[ERROR] remote_stabilize: Node or successor is NULL\n");
         return;
     }
 
-    printf("[INFO] Remote stabilization for Node %d\n", node->id);
+    log_info("[INFO] Remote stabilization for Node %d\n", node->id);
 
     // Step 1: Get successor's predecessor
     Node* x = remote_get_successor(node->successor->Ip);
     if (x == NULL) {
-        printf("[WARN] Could not get successor's predecessor\n");
+        log_warn("[WARN] Could not get successor's predecessor\n");
         return;
     }
 
@@ -1034,7 +1035,7 @@ void remote_stabilize(Node *node) {
     if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
         node->successor = x;
         saveNodeToFile(node, "nodeInfo/Node");
-        printf("[INFO] Updated successor to Node %d\n", x->id);
+        log_info("[INFO] Updated successor to Node %d\n", x->id);
     }
 
     // Step 3: Notify the successor about this node as a potential predecessor

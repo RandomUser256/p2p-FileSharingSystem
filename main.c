@@ -3,15 +3,31 @@
 #include "src/DHASH.h"
 #include "src/node.h"
 #include "src/maintenance.h"
+#include "src/logger.h"
 
-//COMPILING COMMAND: gcc -pthread main.c -o main
+//COMPILING COMMAND: gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c -o main -lm
+
+/*
+NOTE: Compile all source files together:
+gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c -o main -lm
+
+This compiles:
+  - main.c (your program)
+  - src/node.c (core Chord functions)
+  - src/DHASH.c (DHT operations)
+  - src/maintenance.c (background maintenance)
+  
+And links against libm (math library) with pthread support
+*/
 
 /*
 TODO
-    - Fix library importing issues with p_thread in maintanence.c
+    - Gets stuck on an infinite "Error, couldnt load node correctly"
 */
 
 int main() {
+    set_log_level(LOG_NONE); // Set to LOG_INFO or LOG_DEBUG for more detailed output
+
     char input[100];
 
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
@@ -46,7 +62,7 @@ int main() {
 
     while (true) {
         // 1. Print a prompt
-        printf("Enter command: join node to network [n] (only if new to the network), test chord ring structure [t], get current node information [g], or exit [e]): ");
+        printf("Enter command: join node to network [n] (only if new to the network), test chord ring structure [t], get current node information [g], toggle system logs [l], toggle error/warning logs [w], or exit [e]): ");
         
         // 2. Read input from user
         if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -75,7 +91,7 @@ int main() {
         }
         else if (strcmp(input, "t") == 0) {
             // Test chord ring structure
-            remote_check_ring(localNode, localNode->Ip);
+            remote_check_ring(localNode, localNode->successor->Ip);
         } else if (strcmp(input, "g") == 0) {
             // Get current node information
             nodePrint(localNode);
@@ -84,7 +100,16 @@ int main() {
             printf("Exiting...\n");
             freeNode(localNode);
             break;
-        } else {
+        }  else if (strcmp(input, "l") == 0) {
+            // Toggle system logs
+            set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
+            printf("System logs %s\n", get_log_level() == LOG_NONE ? "disabled" : "enabled");
+        } else if (strcmp(input, "w") == 0) {
+            // Toggle error/warning logs
+            set_log_level(get_log_level() == LOG_NONE ? LOG_WARN : LOG_NONE);
+            printf("Error/warning logs %s\n", get_log_level() == LOG_NONE ? "disabled" : "enabled");
+        }
+        else {
             printf("Invalid command. Please try again.\n");
         }
     }

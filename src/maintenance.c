@@ -1,13 +1,15 @@
 #include "maintenance.h"
 #include <unistd.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include "logger.h"
 
-void* maintanance_worker(void arg*) {
+void* maintanance_worker(void* arg) {
     MaintenanceThread* mt = (MaintenanceThread*)arg;
     time_t last_stabilized_time = time(NULL);
     time_t last_fixed_time = time(NULL);
 
-    printf("[MAINTENANCE] Background thread started for Node %d\n", mt->node->id);
+    log_info("[MAINTENANCE] Background thread started for Node %d\n", mt->node->id);
 
     while (mt->running) {
         time_t now = time(NULL);
@@ -17,7 +19,7 @@ void* maintanance_worker(void arg*) {
 
             last_stabilized_time = now;
 
-            printf("[MAINTENANCE] Stabilization completed for Node %d\n", mt->node->id);
+            log_info("[MAINTENANCE] Stabilization completed for Node %d\n", mt->node->id);
         }
 
         if ((now-last_fixed_time) >= mt->fix_fingers_interval_ms / 1000) {
@@ -25,13 +27,13 @@ void* maintanance_worker(void arg*) {
 
             last_fixed_time = now;
 
-            printf("[MAINTENANCE] Fix fingers completed for Node %d\n", mt->node->id);
+            log_info("[MAINTENANCE] Fix fingers completed for Node %d\n", mt->node->id);
         }
 
         usleep(50000); // Sleep for stabilize interval
     }
 
-    printf("[MAINTENANCE] Background thread stopping for Node %d\n", mt->node->id);
+    log_info("[MAINTENANCE] Background thread stopping for Node %d\n", mt->node->id);
 
     return NULL;
 }
@@ -45,12 +47,12 @@ MaintenanceThread* start_maintenance_thread(Node* node, int stabilize_interval_m
 
     pthread_t thread_id;
     if(pthread_create(&thread_id, NULL, maintanance_worker,(void*)mt) != 0) {
-        printf("Failed to create maintenance thread\n");
+        log_warn("Failed to create maintenance thread\n");
         free(mt);
         return NULL;
     }
 
-    printf("[Maintenance] Started background thread for Node %d \n",
+    log_info("[Maintenance] Started background thread for Node %d \n",
            node->id);
 
     return mt;
@@ -64,18 +66,18 @@ void stop_maintenance_thread(MaintenanceThread* mt) {
     mt->running = 0; // Signal the thread to stop
     sleep(1); // Give the thread time to exit
 
-    printf("[Maintenance] Stopped background thread for Node %d \n",
+    log_info("[Maintenance] Stopped background thread for Node %d \n",
            mt->node->id);
     free(mt);
     sleep(1); // Ensure thread has time to clean up
 }
 
 void perform_stabilization_cycle(Node* node) {
-    printf("[STAB] Manual stabilization triggered for Node %d\n", node->id);
+    log_info("[STAB] Manual stabilization triggered for Node %d\n", node->id);
     stabilize(node);
 }
 
 void perform_finger_fix_cycle(Node* node) {
-    printf("[FINGER] Manual finger fix triggered for Node %d\n", node->id);
+    log_info("[FINGER] Manual finger fix triggered for Node %d\n", node->id);
     fix_fingers(node);
 }

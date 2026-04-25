@@ -11,7 +11,9 @@
 
 #include "node.h"
 
-Node* lookup(Node* node, /*char* identifier*/ int identifier);
+//typedef struct Node Node;
+
+Node* lookup(Node* node, int identifier);
 char* generateDestinationFilePath(Node* destinationNode, char* identifier);
 void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destination);
 
