@@ -39,7 +39,7 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // get_successor
+    // Gets succesor of local node and prints it
     if (strcmp(argv[1], "get_successor") == 0) {
         if (node->successor != NULL) {
             printf("%d %s\n", node->successor->id, node->successor->Ip);
@@ -103,6 +103,35 @@ int main(int argc, char* argv[]) {
                entry->upperIntervalLimit,
                succ_id,
                succ_ip);
+        return 0;
+    }
+
+    //Stabilize
+    if (strcmp(argv[1], "stabilize") == 0) {
+        if(argc < 3) {
+            fprintf(stderr, "Error, not enough arguments in the call");
+            return 1;
+        }
+
+        int targetId = atoi(argv[2]);
+
+        Node* predecessor = remote_closest_preceding_finger(node->Ip, node->id);
+        //Node* predecessor = node->predecessor;
+
+        Node* successor = remote_find_successor(node->Ip, )
+
+        if (in_open_interval(predecessor->id, node->id, node->successor->id)) {
+            node->successor = predecessor;
+        }
+
+        //NOTIFY phase
+        Node* succPred = find_predecessor(node, node->successor->id)
+
+
+        if (predecessor == NULL || in_open_interval(node->id, predecessor->id, node->successor->id)) {
+            predecessor = node;
+        }
+
         return 0;
     }
 

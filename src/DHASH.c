@@ -189,3 +189,14 @@ Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     pclose(fp);
     return createNode(id, remoteIp, "");
 }
+
+//Ip of host node where stabilize is called 
+Node* remote_stabilize(const char* ip) {
+    char command[256];
+
+    snprintf(command, sizeof(command),
+        "ssh %s \"./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
+        ip,
+        targetId
+    );
+}

@@ -885,3 +885,14 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
     printf("Warning: max hops reached in find_predecessor_with_finger_table\n");
     return cpf;
 }
+
+void remote_stabilize(Node *node) {
+    char command[256];
+
+    Node* succesor = remote_find_successor(node->Ip, node->id);
+
+    Node* predecessor = remote_closest_preceding_finger()
+
+    snprintf(command, sizeof(command), "ssh %s \"./node_comms stabilize\"", node->Ip);
+    system(command);
+}

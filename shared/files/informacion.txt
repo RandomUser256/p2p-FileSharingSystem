@@ -1,23 +1,8 @@
-IP
-FILE PATH
-ID
-NODES
+#Stored file information
 
-Fingertable
-int start/id
-int lower y upper interval
-pointer a un nodo (successor)
-char id del( successor)
-
-Node
-id
-ip
-successor (nodo) pointer
-predeccesor (nodo) pointer
-file content path (str)
-fingerTableEntries (array)
-
-createNode(almacenar informacion localmente)
-
-find successor
+FILE experiments.txt
+CHUNK experimentsa.bin 3 7
+CHUNK experimentsb.bin 5 9
+CHUNK experimentsc.bin 1 4
+END
 
