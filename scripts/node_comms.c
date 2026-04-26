@@ -21,6 +21,7 @@ TODO
 int main(int argc, char* argv[]) {
 
     Node* node = loadNodeFromFile("../nodeInfo/Node");
+    loadFingerTableFromFile(node, "../nodeInfo/FingerTable");
 
     if(node == NULL) {
         log_error("Failed to load local node from file\n");
@@ -48,6 +49,7 @@ int main(int argc, char* argv[]) {
 
         if(result != NULL) {
             printf("%d %s\n", result->id, result->Ip);
+            return 1;
         } else {
             log_error("[ERROR] Failed to find successor for ID %d with node %d\n", targetId, node->id);
             //fprintf(stderr, "ERROR, process didn't execute fully or correctly\n");

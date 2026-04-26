@@ -521,7 +521,7 @@ void remote_join(const char* existingNodeIp, Node* newNode) {
 
     char command[256];
     snprintf(command, sizeof(command),
-             "ssh %s \"./scripts/node_comms join %d %s\" 2>/dev/null",
+             "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
              existingNodeIp,
              newNode->id,
              newNode->Ip);
@@ -636,6 +636,7 @@ void check_ring(Node* start) {
 }
 
 void remote_check_ring(Node* start, const char* ip) {
+    /*
     char command[256];
 
     int ringId = start->id; // Assuming the ring ID is the same as the node ID for simplicity
@@ -645,16 +646,19 @@ void remote_check_ring(Node* start, const char* ip) {
     strcpy(buffer, ip); // Copy the IP address to a local variable to avoid modifying the original string
 
     char* ringIp = buffer;
-
+    */
     Node* ringChecker = start;
 
     //  "Ring check passed for node %d at IP %s\n", node->id, node->Ip);
     do {
-        if (ringChecker->successor->predecessor != ringChecker) {
+        Node* succPred = remote_closest_preceding_finger(ringChecker->Ip, ringChecker->successor->id); // Get the closest preceding finger for the current node to check the ring structure
+        Node* predSucc = remote_find_successor(ringChecker->Ip, ringChecker->predecessor->id); // Get the successor of the predecessor of the current node to check the ring structure
+
+        if (/*ringChecker->successor->predecessor*/ succPred != ringChecker) {
             log_error("ERROR: successor->predecessor mismatch at node %d\n", ringChecker->id);
             return;
         }
-        if (ringChecker->predecessor->successor != ringChecker) {
+        if (/*ringChecker->predecessor->successor*/ predSucc != ringChecker) {
             log_error("ERROR: predecessor->successor mismatch at node %d\n", ringChecker->id);
             return;
         }
@@ -670,7 +674,7 @@ void remote_check_ring(Node* start, const char* ip) {
 
         //sscanf(result, "%d %15s", &ringId, ringIp); // Parse the result to extract the ring ID and IP address
         */
-        log_info("[INFO] Ring check passed for node %d %s\n", ringChecker->id, ringChecker->Ip);
+        printf("[INFO] Ring check passed for node %d %s\n", ringChecker->id, ringChecker->Ip);
 
         //ringIp = start->successor->Ip; // Move to the next node in the ring using the successor's IP address
         ringChecker = remote_find_successor(ringChecker->Ip, ringChecker->successor->id); // Move to the next node in the ring using the successor's IP address
@@ -829,7 +833,7 @@ void printFingerTable(Node* node) {
 void remote_print_finger_table(const char* ip) {
     char command[256];
     snprintf(command, sizeof(command),
-        "ssh %s \"./scripts/node_comms print_finger_table\" 2>/dev/null",
+        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms print_finger_table\" 2>/dev/null",
         ip);
 
     system(command);
@@ -845,7 +849,7 @@ void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
 
     char command[512];
     snprintf(command, sizeof(command),
-        "ssh %s \"cat nodeInfo/FingerTable 2>/dev/null\" 2>/dev/null",
+        "ssh %s \"cd /home/mmagallanes && cat nodeInfo/FingerTable 2>/dev/null\" 2>/dev/null",
         remote_ip);
 
     FILE* fp = popen(command, "r");
@@ -1014,9 +1018,8 @@ void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
 
     char command[512];
     snprintf(command, sizeof(command),
-        "ssh %s 'cd %s && ./node_comms notify %d %s'",
+        "ssh %s 'cd /home/mmagallanes && ./scripts/node_comms notify %d %s'",
         remote_ip,
-        "scripts",  // This should be configurable
         potentialPredecessor->id,
         potentialPredecessor->Ip);
 

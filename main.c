@@ -5,8 +5,6 @@
 #include "src/maintenance.h"
 #include "src/logger.h"
 
-//COMPILING COMMAND: gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c -o main -lm
-
 /*
 NOTE: Compile all source files together:
 gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c -o main -lm
@@ -22,7 +20,11 @@ And links against libm (math library) with pthread support
 
 /*
 TODO
-    - Gets stuck on an infinite "Error, couldnt load node correctly"
+    - Error when checking ring structure
+        - In node.c: remote_get_successor() called within remote_stabilize() is not working correctly, causing the ring structure check to fail when it tries to get the successor of the predecessor of a node
+        - In DHASH.c: remote_find_successor() is not working, 
+            - the relative path in the remote ssh commands may be the problem
+    - In node.c and DHASH.c, changed the ssh commmand section 'cd /home/mmagallanes' to accept arguments to change the user name depending on the machine
 */
 
 int main() {
@@ -31,6 +33,7 @@ int main() {
     char input[100];
 
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
+    loadFingerTableFromFile(localNode, "nodeInfo/FingerTable");
 
     if (localNode == NULL) {
         printf("Error, couldn't load node correctly\n");

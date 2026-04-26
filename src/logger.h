@@ -2,6 +2,7 @@
 #define LOGGER_H
 
 // Log levels
+//When setting log level to any level, you can view the current level's logs and all lower level logs
 typedef enum {
     LOG_NONE = 0,
     LOG_ERROR = 1,

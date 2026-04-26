@@ -83,7 +83,7 @@ Node* remote_find_successor(const char* ip, int targetId) {
     char command[512];
 
     snprintf(command, sizeof(command),
-        "ssh %s \"./scripts/node_comms find_successor %d\" 2>/dev/null",
+        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms find_successor %d\" 2>/dev/null",
         ip,
         targetId
     );
@@ -122,7 +122,7 @@ Node* remote_get_successor(const char* ip) {
     char command[256];
 
     snprintf(command, sizeof(command),
-        "ssh %s \"./scripts/node_comms get_successor\" 2>/dev/null",
+        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms get_successor\" 2>/dev/null",
         ip
     );
 
@@ -148,14 +148,14 @@ Node* remote_get_successor(const char* ip) {
     }
 
     pclose(fp);
-    return createNode(id, remoteIp, "");
+    return createNode(id, remoteIp, "shared/files");
 }
 
 Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     char command[256];
 
     snprintf(command, sizeof(command),
-        "ssh %s \"./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
+        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
         ip,
         targetId
     );
@@ -181,7 +181,7 @@ Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     }
 
     pclose(fp);
-    return createNode(id, remoteIp, "");
+    return createNode(id, remoteIp, "shared/files");
 }
 
 // remote_stabilize is now defined in node.c with proper implementation
