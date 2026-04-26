@@ -33,7 +33,8 @@ int main() {
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
 
     if (localNode == NULL) {
-        fprintf(stderr, "Error, couldn't load node correctly\n");
+        printf("Error, couldn't load node correctly\n");
+        //fprintf(stderr, "Error, couldn't load node correctly\n");
         
         printf("Enter IP of this node: ");
 

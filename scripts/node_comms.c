@@ -20,22 +20,25 @@ TODO
 
 int main(int argc, char* argv[]) {
 
-    Node* node = loadNodeFromFile("nodeInfo/Node");
+    Node* node = loadNodeFromFile("../nodeInfo/Node");
 
     if(node == NULL) {
-        fprintf(stderr, "Error, couldn't load node correctly\n");
+        log_error("Failed to load local node from file\n");
+        //fprintf(stderr, "Error, couldn't load node correctly\n");
         return 1;
     }
 
     if(argc < 2) {
-        fprintf(stderr, "Error, not enough arguments in the call");
+        log_error("[ERROR] No command provided for node_comms\n");
+        //fprintf(stderr, "Error, not enough arguments in the call");
         return 1;
     }
 
     //find_successor <id>
     if(strcmp(argv[1], "find_successor") == 0) {
         if(argc < 3) {
-            fprintf(stderr, "Error, not enough arguments in the call");
+            log_error("[ERROR] Not enough arguments for find_successor\n");
+            //fprintf(stderr, "Error, not enough arguments in the call");
             return 1;
         }
 
@@ -46,7 +49,8 @@ int main(int argc, char* argv[]) {
         if(result != NULL) {
             printf("%d %s\n", result->id, result->Ip);
         } else {
-            fprintf(stderr, "ERROR, process didn't execute fully or correctly\n");
+            log_error("[ERROR] Failed to find successor for ID %d with node %d\n", targetId, node->id);
+            //fprintf(stderr, "ERROR, process didn't execute fully or correctly\n");
         }
     }
 
@@ -78,14 +82,14 @@ int main(int argc, char* argv[]) {
 
     // save_finger_table
     if (strcmp(argv[1], "save_finger_table") == 0) {
-        saveFingerTableToFile(node, "nodeInfo/FingerTable");
+        saveFingerTableToFile(node, "../nodeInfo/FingerTable");
         log_info("[INFO] Finger table saved successfully\n");
         return 0;
     }
 
     // load_finger_table
     if (strcmp(argv[1], "load_finger_table") == 0) {
-        loadFingerTableFromFile(node, "nodeInfo/FingerTable");
+        loadFingerTableFromFile(node, "../nodeInfo/FingerTable");
         log_info("[INFO] Finger table loaded successfully\n");
         return 0;
     }
@@ -158,7 +162,7 @@ int main(int argc, char* argv[]) {
             node->predecessor = createNode(pred_id, pred_ip, "");
             
             // Save changes to disk
-            saveNodeToFile(node, "nodeInfo/Node");
+            saveNodeToFile(node, "../nodeInfo/Node");
             
             log_info("[INFO] Predecessor updated to Node %d (IP: %s)\n", pred_id, pred_ip);
         }
@@ -176,7 +180,7 @@ int main(int argc, char* argv[]) {
         Node* x = remote_get_successor(node->successor->Ip);
         if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
             node->successor = x;
-            saveNodeToFile(node, "nodeInfo/Node");
+            saveNodeToFile(node, "../nodeInfo/Node");
             log_info("[INFO] Updated successor to Node %d\n", x->id);
         }
 
@@ -212,7 +216,7 @@ int main(int argc, char* argv[]) {
         node->predecessor = createNode(target_node->predecessor->id, target_node->predecessor->Ip, "");
 
         // Save changes to disk
-        saveNodeToFile(node, "nodeInfo/Node");
+        saveNodeToFile(node, "../nodeInfo/Node");
 
         log_info("[INFO] Joined ring via Node %d (IP: %s)\n", target_node->id, target_node->Ip);
         

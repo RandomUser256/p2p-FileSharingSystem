@@ -152,7 +152,8 @@ Node* loadNodeFromFile(const char* filepath) {
     int hasData = 0;
 
     if (!file) {
-        fprintf(stderr, "Error opening Node file\n");
+        printf("Error opening Node file\n");
+        //fprintf(stderr, "Error opening Node file\n");
         return NULL;
     }
 
@@ -179,19 +180,20 @@ Node* loadNodeFromFile(const char* filepath) {
 
     fclose(file);
 
+    if (!hasData || id == 0 || ip[0] == '\0') {
+        printf("No data read from node file\n");
+        return NULL;
+    }
+
     Node* node = createNode(id, ip, path);
 
     if (succId != -1)
-        node->successor   = createNode(succId, succIp, "");
+        node->successor   = createNode(succId, succIp, "shared/files");
     if (predId != -1)
-        node->predecessor = createNode(predId, predIp, "");
+        node->predecessor = createNode(predId, predIp, "shared/files");
 
     fprintf(stderr, "Loaded node: ID=%d IP=%s PATH=%s succ=%d pred=%d\n",
             id, ip, path, succId, predId);
-
-    if (!hasData || id == 0 || ip[0] == '\0') {
-        return NULL;
-    }
 
     return node;
 }
@@ -314,7 +316,7 @@ Node* find_predecessor(Node* startNode, int id) {
     if (id != startNode->id) {
         if (half_left_open_interval(id, startNode->id, startNode->successor->id)) {
             // Always return a fresh heap allocation so callers can freeNode safely.
-            return createNode(startNode->id, startNode->Ip, "");
+            return createNode(startNode->id, startNode->Ip, "shared/files");
         }
     }
 
@@ -328,7 +330,7 @@ Node* find_predecessor(Node* startNode, int id) {
     if (cpf->id == startNode->id) {
         // Finger table gave us nothing useful — step to successor instead.
         freeNode(cpf);
-        n = createNode(startNode->successor->id, startNode->successor->Ip, "");
+        n = createNode(startNode->successor->id, startNode->successor->Ip, "shared/files");
     } else {
         n = cpf;
     }
@@ -644,9 +646,20 @@ void remote_check_ring(Node* start, const char* ip) {
 
     char* ringIp = buffer;
 
+    Node* ringChecker = start;
+
     //  "Ring check passed for node %d at IP %s\n", node->id, node->Ip);
     do {
-        snprintf(command, sizeof(command), "ssh %s \"./scripts/node_comms check_ring\" 2>/dev/null", ringIp);
+        if (ringChecker->successor->predecessor != ringChecker) {
+            log_error("ERROR: successor->predecessor mismatch at node %d\n", ringChecker->id);
+            return;
+        }
+        if (ringChecker->predecessor->successor != ringChecker) {
+            log_error("ERROR: predecessor->successor mismatch at node %d\n", ringChecker->id);
+            return;
+        }
+
+        /*snprintf(command, sizeof(command), "ssh %s \"./scripts/node_comms check_ring\" 2>/dev/null", ringIp);
 
         ringId = system(command); // Execute the command and capture the return value (ring ID)
 
@@ -656,12 +669,13 @@ void remote_check_ring(Node* start, const char* ip) {
         }
 
         //sscanf(result, "%d %15s", &ringId, ringIp); // Parse the result to extract the ring ID and IP address
+        */
+        log_info("[INFO] Ring check passed for node %d %s\n", ringChecker->id, ringChecker->Ip);
 
-        log_info("[INFO] Ring check passed for node %d %s\n", ringId, ringIp);
-
-        ringIp = start->successor->Ip; // Move to the next node in the ring using the successor's IP address
+        //ringIp = start->successor->Ip; // Move to the next node in the ring using the successor's IP address
+        ringChecker = remote_find_successor(ringChecker->Ip, ringChecker->successor->id); // Move to the next node in the ring using the successor's IP address
     }
-    while (ringId != start->id); // Loop until we have checked the entire ring
+    while (ringChecker != start); // Loop until we have checked the entire ring
 }
 
 void executeSSH(const char* ip, const char* command) {
