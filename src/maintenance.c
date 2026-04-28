@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include "logger.h"
 
+//Function that loops in the background
+//Checks for time intervals to routinely execute remote_stabilize() and fix_fingers()
 void* maintanance_worker(void* arg) {
     MaintenanceThread* mt = (MaintenanceThread*)arg;
     time_t last_stabilized_time = time(NULL);
@@ -14,6 +16,7 @@ void* maintanance_worker(void* arg) {
     while (mt->running) {
         time_t now = time(NULL);
 
+        //Checks time intervals to execute stabilization
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000) {
             remote_stabilize(mt->node);
 
@@ -22,6 +25,7 @@ void* maintanance_worker(void* arg) {
             log_info("[MAINTENANCE] Stabilization completed for Node %d\n", mt->node->id);
         }
 
+        //Checks time intervals to execute fix_fingers()
         if ((now-last_fixed_time) >= mt->fix_fingers_interval_ms / 1000) {
             fix_fingers(mt->node);
 
@@ -38,6 +42,7 @@ void* maintanance_worker(void* arg) {
     return NULL;
 }
 
+//Initializes a MaintenanceThread object, assigns time interval values, creates process thread and logs the start of the thread
 MaintenanceThread* start_maintenance_thread(Node* node, int stabilize_interval_ms, int fix_fingers_interval_ms) {
     MaintenanceThread* mt = malloc(sizeof(MaintenanceThread));
     mt->node = node;
@@ -58,6 +63,9 @@ MaintenanceThread* start_maintenance_thread(Node* node, int stabilize_interval_m
     return mt;
 }
 
+//Stops the background thread
+//mt->running is a flag value that is checked by the loop in maintanance_worker() to stop the process
+//Logs the stop of the process
 void stop_maintenance_thread(MaintenanceThread* mt) {
     if (mt == NULL) {
         return;
@@ -71,6 +79,9 @@ void stop_maintenance_thread(MaintenanceThread* mt) {
     free(mt);
     sleep(1); // Ensure thread has time to clean up
 }
+
+
+//Local implementations of stabilize and fix_finger, does not work for a distributed network of computers
 
 void perform_stabilization_cycle(Node* node) {
     log_info("[STAB] Manual stabilization triggered for Node %d\n", node->id);

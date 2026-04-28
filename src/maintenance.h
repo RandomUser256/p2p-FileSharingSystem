@@ -6,11 +6,8 @@
 #include "node.h"
 
 /*
-//Forward declaration of struct
-struct Node; 
-
-// 2. Map the typedef (if the original was "typedef struct Node Node")
-typedef struct Node Node;
+Class meant to execute stabilize and fix_fingers functionality from chord network.
+Runs in a background thread, each action is execute every time in a given time interval
 */
 
 typedef struct {

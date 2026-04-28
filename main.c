@@ -24,6 +24,7 @@ TODO
         - In node.c: remote_get_successor() called within remote_stabilize() is not working correctly, causing the ring structure check to fail when it tries to get the successor of the predecessor of a node
         - In DHASH.c: remote_find_successor() is not working, 
             - the relative path in the remote ssh commands may be the problem
+            - in the SSH command it does not specify which user to use, check version in remote_join() to change all other ssh commands
     - In node.c and DHASH.c, changed the ssh commmand section 'cd /home/mmagallanes' to accept arguments to change the user name depending on the machine
 */
 
@@ -56,7 +57,7 @@ int main() {
     }
 
     
-
+    // Background service that maintains chord ring integrity
     MaintenanceThread* mt = start_maintenance_thread(localNode, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
 
     printf("\n╔════════════════════════════════════════════════════════════╗\n");
@@ -91,14 +92,27 @@ int main() {
             strncpy(existingIp, input, sizeof(existingIp) - 1);
             existingIp[sizeof(existingIp) - 1] = '\0'; // Read the IP address of an existing node in the network
 
-            remote_join(existingIp, localNode);
+            printf("Enter username of profile in existing node to join: ");
+
+            if (fgets(input, sizeof(input), stdin) == NULL) {
+                break; // Handle Ctrl+D (EOF)
+            }
+
+            char existingUser[16];
+            strncpy(existingUser, input, sizeof(existingUser) - 1);
+            existingUser[sizeof(existingUser) - 1] = '\0'; // Read the IP address of an existing node in the network
+
+            printf(existingUser);
+            remote_join(existingIp, existingUser,localNode);
         }
         else if (strcmp(input, "t") == 0) {
             // Test chord ring structure
             remote_check_ring(localNode, localNode->successor->Ip);
         } else if (strcmp(input, "g") == 0) {
+            set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
             // Get current node information
             nodePrint(localNode);
+            set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
         } else if (strcmp(input, "e") == 0) {
             // Exit
             printf("Exiting...\n");

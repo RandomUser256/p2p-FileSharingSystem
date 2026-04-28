@@ -23,12 +23,7 @@ ERRORS
     - When looking for the successor of an ID that is active in the ring, it returns that same ID instead of its successor 
 */
 
-/*
-#define MAX_IP_LENGTH 16
-#define MAX_FILE_PATH_LENGTH 256
-#define NODE_ID_LENGTH 4 //in bits, equal to 16 total nodes
-#define MAX_NUMBER_NODES (1U << NODE_ID_LENGTH) //Maximum number of nodes in the network
-*/
+//Helper functions for evaluating the position of a value within a number interval
 
 int in_open_interval(int id, int start, int end) {
     if (start < end)
@@ -51,36 +46,7 @@ int half_right_open_interval(int id, int start, int end) {
         return id >= start || id < end; // wraparound
 }
 
-/*
-//Forward declaration of Node struct
-struct Node;
-typedef struct Node Node;
-
-//Finger table
-
-typedef struct FingerTableEntry {
-    int start;
-    //Node* parent_node;
-    int lowerIntervalLimit;
-    int upperIntervalLimit;
-    Node* successor;
-    char Ip[MAX_IP_LENGTH];
-} FingerTableEntry;
-
-//Node 
-typedef struct Node {
-    int id;
-    char Ip[MAX_IP_LENGTH];
-    Node* successor;
-    Node* predecessor;
-
-    char fileContentPath[MAX_FILE_PATH_LENGTH];  
-
-    //Finger table
-    struct FingerTableEntry fingerTable[NODE_ID_LENGTH];
-} Node;
- */
-
+//Helper functions for checking for null objects
 bool nullCheckNode(Node* node) {
     if (node) {
         return true;
@@ -92,6 +58,8 @@ bool nullCheckFingerTable(FingerTableEntry* entry) {
     return nullCheckNode(entry->successor);
 }
 
+
+//Initializes a single FingerTableEntry for a table from the parent_node
 FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Node* successor) {
     FingerTableEntry* entry = malloc(sizeof(FingerTableEntry));
     if (!entry) {
@@ -120,6 +88,7 @@ FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Nod
     return entry;
 }
 
+
 void updateValuesFingerTable(Node* node) {
     for (int i = 1; i <= NODE_ID_LENGTH; i++) {
         node->fingerTable[i-1].start =
@@ -133,8 +102,6 @@ void updateValuesFingerTable(Node* node) {
             node->fingerTable[i-1].upperIntervalLimit = node->fingerTable[0].start; // Wrap around for the last entry
         }
 
-        //node->fingerTable[i].upperIntervalLimit = node->fingerTable[i+1].start;
-
         node->fingerTable[i-1].successor = node;
 
         node->fingerTable[i-1].Ip[0] = '\0';
@@ -146,6 +113,8 @@ Node* createNode(int id, const char* ip, const char* fileContentPath);
 void saveFingerTableToFile(Node* node, const char* filepath);
 void saveNodeToFile(Node* node, const char* filepath);
 
+
+//Reads local Node text file to construct a Node object in the main proecss
 Node* loadNodeFromFile(const char* filepath) {
     FILE* file = fopen(filepath, "r");
 
@@ -157,6 +126,7 @@ Node* loadNodeFromFile(const char* filepath) {
         return NULL;
     }
 
+    //Variables for different node values
     int  id    = 0;
     char ip[MAX_IP_LENGTH]          = {0};
     char path[MAX_FILE_PATH_LENGTH] = {0};
@@ -165,6 +135,7 @@ Node* loadNodeFromFile(const char* filepath) {
 
     char line[512];
 
+    //Scans text file structure and assigns values to variables
     while (fgets(line, sizeof(line), file)) {
         line[strcspn(line, "\r\n")] = '\0';
 
@@ -180,6 +151,7 @@ Node* loadNodeFromFile(const char* filepath) {
 
     fclose(file);
 
+    //Checks that the file was not empty
     if (!hasData || id == 0 || ip[0] == '\0') {
         printf("No data read from node file\n");
         return NULL;
@@ -192,12 +164,14 @@ Node* loadNodeFromFile(const char* filepath) {
     if (predId != -1)
         node->predecessor = createNode(predId, predIp, "shared/files");
 
+    //Prints success of loading process
     fprintf(stderr, "Loaded node: ID=%d IP=%s PATH=%s succ=%d pred=%d\n",
             id, ip, path, succId, predId);
 
     return node;
 }
 
+//Saves the current state of the Node object to the Node text file
 void saveNodeToFile(Node* node, const char* filepath) {
     FILE* file = fopen(filepath, "w");
 
@@ -219,9 +193,10 @@ void saveNodeToFile(Node* node, const char* filepath) {
     fclose(file);
 }
 
-//Review function as node properties change
+//Creates a Node object from the given information
 Node* createNode(int id, const char* ip, const char* fileContentPath) {
     Node* newNode = malloc(sizeof(Node));
+
     newNode->id = id;
     strncpy(newNode->Ip, ip, MAX_IP_LENGTH - 1);
     newNode->Ip[MAX_IP_LENGTH - 1] = '\0'; // Ensure null-termination
@@ -230,7 +205,6 @@ Node* createNode(int id, const char* ip, const char* fileContentPath) {
     newNode->successor = newNode;
     newNode->predecessor = newNode;
 
-    //newNode->fingerTable[0] = createFingerTableEntry(1, newNode, newNode); // Initialize the first entry in the finger table with the new node as its own successor
     // Initialize finger table
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
         newNode->fingerTable[i].start =
@@ -253,6 +227,7 @@ Node* createNode(int id, const char* ip, const char* fileContentPath) {
     return newNode;
 }
 
+
 Node* closest_preceding_finger(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -261,7 +236,6 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     for (size_t i = NODE_ID_LENGTH; i > 0; i--)
     {
         //if the successor of the finger table entry is valid and between current node's id and the target id, return that successor
-
         Node* finger = node->fingerTable[i-1].successor;
 
         if (finger != NULL &&
@@ -284,25 +258,6 @@ void freeNode(Node* node) {
         free(node);
     }
 }
-
-/*
-Node* find_predecessor(Node* node, int targetId) {
-    if (!node) {
-        return NULL;
-    }
-
-    Node* n = node;
-
-    while (!half_left_open_interval(targetId, n->id, n->successor->id)) {
-        Node* next = closest_preceding_finger(n, targetId);
-
-        if (next == n) break;  // prevent infinite loop
-
-        n = next;
-    }
-
-    return n;
-}*/
 
 Node* find_predecessor(Node* startNode, int id) {
     if (!startNode || !startNode->successor) {
@@ -386,20 +341,7 @@ Node* find_predecessor(Node* startNode, int id) {
     return NULL;
 }
 
-/*
-Node* find_successor(Node* node, int targetId) {
-    if (!node) {
-        return NULL;
-    }
-
-    Node* pred = find_predecessor(node, targetId);
-    if (pred != NULL) {
-        return pred->successor; // The successor of the predecessor is the successor of the target ID
-    }
-    return NULL; // If no predecessor is found, return NULL
-} 
-*/
-
+//Chord algorithm successor check
 Node* find_successor(Node* node, int id) {
     Node* pred = find_predecessor(node, id);
 
@@ -433,6 +375,7 @@ Node* init_finger_table(Node* existingNode, Node* newNode) {
     return newNode; // Return the initialized node with its finger table set up
 }
 
+//Update finger tables when the structure of the chord ring changes
 void update_finger_table(Node* existingNode, Node* newNode, int tableEntryNumber) {
     if (!existingNode || !newNode) {
         return;
@@ -452,6 +395,7 @@ void update_finger_table(Node* existingNode, Node* newNode, int tableEntryNumber
     }
 }
 
+//Not in use currently
 void update_others(Node* currentNode) {
     if (!currentNode) {
         return;
@@ -468,7 +412,7 @@ void update_others(Node* currentNode) {
     }
 } 
 
-//Second version of join, supports concurrent node joins
+//Second version of Chrod algorithm join, supports concurrent node joins
 void join(Node* existingNode, Node* newNode) {
     if (!newNode) {
         return;
@@ -479,11 +423,6 @@ void join(Node* existingNode, Node* newNode) {
         newNode->successor = newNode;
         newNode->predecessor = newNode;
 
-        /*
-        for (int i = 0; i < NODE_ID_LENGTH; i++) {
-            newNode->fingerTable[i].successor = newNode;
-        }
-        */
     } else {
         Node* successor = find_successor(existingNode, newNode->id); // Find the successor of the existing node using the new node as a reference point
 
@@ -503,7 +442,7 @@ void join(Node* existingNode, Node* newNode) {
 
 //Remotely updates ring structure to include new node. Has to be called by new node wanting to join the network
 //Must know beforehand the IP of an existing node in the network to perform the join operation
-void remote_join(const char* existingNodeIp, Node* newNode) {
+void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node* newNode) {
     if (!newNode) {
         return;
     }
@@ -521,10 +460,11 @@ void remote_join(const char* existingNodeIp, Node* newNode) {
 
     char command[256];
     snprintf(command, sizeof(command),
-             "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
-             existingNodeIp,
-             newNode->id,
-             newNode->Ip);
+         "ssh %s@%s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
+         existingNodeUser,
+         existingNodeIp,
+         newNode->id,
+         newNode->Ip);
 
     int result = system(command); // Execute the command to perform the join operation on the remote node
 
@@ -549,7 +489,6 @@ void fix_fingers(Node* node) {
     //Update file FingerTable
     saveFingerTableToFile(node, "nodeInfo/FingerTable");
 
-    //update_finger_table(node, node->fingerTable[i-1].successor, i); // Update the start, lower interval limit, and upper interval limit for the selected entry in the finger table
 }
     
 //Second version of notify, supports concurrent node joins
@@ -590,6 +529,7 @@ void stabilize(Node* node) {
 
 //Troublshooting functions
 
+//Prints information of current node
 void nodePrint(Node* node) {
     if (node == NULL) {
         log_info("[INFO] Node is NULL.\n");
@@ -620,6 +560,7 @@ void printNodeList(Node* head) {
     
 }
 
+//Checks integrity of ring structure
 void check_ring(Node* start) {
     Node* curr = start;
 
@@ -682,6 +623,7 @@ void remote_check_ring(Node* start, const char* ip) {
     while (ringChecker != start); // Loop until we have checked the entire ring
 }
 
+//Not in use currently
 void executeSSH(const char* ip, const char* command) {
     char fullCommand[512];
 
@@ -697,6 +639,7 @@ void executeSSH(const char* ip, const char* command) {
    - Save/load finger table to/from disk
 */
 
+//Saves current state of finger table to local FingerTable file
 void saveFingerTableToFile(Node* node, const char* filepath) {
     if (!node) {
         printf("Error: node is NULL\n");
@@ -712,6 +655,7 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
     fprintf(file, "# Finger Table for Node %d\n", node->id);
     fprintf(file, "# Format: entry=<idx>,start=<start>,lower=<lower>,upper=<upper>,successor_id=<id>,successor_ip=<ip>\n\n");
 
+    //Loops through every line in the file and extracts information from each FingerTableEntry object
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
         FingerTableEntry* entry = &node->fingerTable[i];
         
@@ -731,6 +675,7 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
     log_info("[INFO] Finger table for node %d saved to %s\n", node->id, filepath);
 }
 
+//Loads ingertable from local text file and saves it to the Node object 
 void loadFingerTableFromFile(Node* node, const char* filepath) {
     if (!node) {
         log_error("[ERROR] Error: node is NULL\n");
@@ -746,6 +691,7 @@ void loadFingerTableFromFile(Node* node, const char* filepath) {
     char line[512];
     int entry_idx = 0;
 
+    //Loops through every line in the text file and updates the fingerTable
     while (fgets(line, sizeof(line), file) && entry_idx < NODE_ID_LENGTH) {
         // Skip comments and empty lines
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
@@ -801,6 +747,7 @@ void loadFingerTableFromFile(Node* node, const char* filepath) {
     log_info("[INFO] Finger table for node %d loaded from %s\n", node->id, filepath);
 }
 
+//Prints Node information to console
 void printFingerTable(Node* node) {
     if (!node) {
         log_error("[ERROR] Error: node is NULL\n");
@@ -839,6 +786,7 @@ void remote_print_finger_table(const char* ip) {
     system(command);
 }
 
+//Fetches finger table from another machine and loads information into local nod
 void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
     if (!node) {
         printf("Error: node is NULL\n");
@@ -861,6 +809,7 @@ void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
     char line[512];
     int entry_idx = 0;
 
+    //Constructs fingertable from the extracted tet information
     while (fgets(line, sizeof(line), fp) && entry_idx < NODE_ID_LENGTH) {
         // Skip comments and empty lines
         if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
@@ -926,7 +875,7 @@ Node* find_successor_with_finger_table(Node* node, int id) {
     // Step 1: Quick local check - if id is in interval (node_id, successor_id]
     if (node->successor != NULL && 
         half_left_open_interval(id, node->id, node->successor->id)) {
-        return createNode(node->successor->id, node->successor->Ip, "");
+        return createNode(node->successor->id, node->successor->Ip, "shared/Files");
     }
 
     // Step 2: Find closest preceding finger using the finger table

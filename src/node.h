@@ -63,7 +63,7 @@ void update_finger_table(Node* existingNode, Node* newNode, int tableEntryNumber
 void update_others(Node* currentNode);
 
 void join(Node* existingNode, Node* newNode);
-void remote_join(const char* existingNodeIp, Node* newNode);
+void remote_join(const char* existingNodeIp,  const char* existingNodeUser, Node* newNode);
 void fix_fingers(Node* node);
 void notify(Node* node, Node* potentialPredecessor);
 void stabilize(Node* node);

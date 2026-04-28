@@ -1,6 +1,10 @@
 #ifndef LOGGER_H
 #define LOGGER_H
 
+/*
+This class is in charge of logging string output from other files into different streams, which can be toggled between levels to filert out logs
+*/
+
 // Log levels
 //When setting log level to any level, you can view the current level's logs and all lower level logs
 typedef enum {

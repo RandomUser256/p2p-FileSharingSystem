@@ -11,7 +11,9 @@
 
 #include "node.h"
 
-//typedef struct Node Node;
+/*
+This library is meant to perform hashing functions on files to assign them ID's compatible with the Chord network
+*/
 
 Node* lookup(Node* node, int identifier);
 char* generateDestinationFilePath(Node* destinationNode, char* identifier);
