@@ -8,6 +8,8 @@
 
 #include "node.h"
 #include "logger.h"
+#include "tcp_client.h"
+#include "tcp_protocol.h"
 //#include "DHASH.h"
 
 /*
@@ -447,30 +449,37 @@ void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node*
         return;
     }
 
-    Node* remoteSuccessor = remote_find_successor(existingNodeIp, newNode->id); // Find the successor of the new node using the existing node as a reference point through remote communication
-
-    newNode->successor = remoteSuccessor; // Update the successor of the new node to point to the successor obtained through remote communication
-    newNode->predecessor = remoteSuccessor->predecessor; // Update the predecessor of the new node to point to the predecessor of the successor obtained through remote communication
-
-    if (remoteSuccessor->predecessor != NULL) {
-        remoteSuccessor->predecessor->successor = newNode; // Update the successor of the predecessor of the successor obtained through remote communication to point to the new node
+    /* Find the successor of the new node using the existing node as a reference */
+    Node* remoteSuccessor = remote_find_successor(existingNodeIp, newNode->id);
+    
+    if (!remoteSuccessor) {
+        printf("Error: Could not find successor for new node\n");
+        return;
     }
 
-    remoteSuccessor->predecessor = newNode; // Update the predecessor of the successor obtained through remote communication to point to the new node
+    /* Update the successor of the new node */
+    newNode->successor = remoteSuccessor;
+    
+    /* Get the predecessor of the successor (local copy) */
+    Node* remoteSuccessorPred = remote_get_successor(remoteSuccessor->Ip);
+    if (remoteSuccessorPred) {
+        newNode->predecessor = remoteSuccessorPred;
+    }
 
-    char command[256];
-    snprintf(command, sizeof(command),
-         "ssh %s@%s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
-         existingNodeUser,
-         existingNodeIp,
-         newNode->id,
-         newNode->Ip);
+    /* Notify the successor about the new node as its predecessor via TCP */
+    log_info("[INFO] Notifying successor %d about new node %d\n", 
+             remoteSuccessor->id, newNode->id);
+    remote_notify(remoteSuccessor->Ip, newNode);
 
-    int result = system(command); // Execute the command to perform the join operation on the remote node
+    /* Notify the predecessor about the new node as its successor */
+    if (newNode->predecessor) {
+        log_info("[INFO] Notifying predecessor %d about new node %d\n", 
+                 newNode->predecessor->id, newNode->id);
+        remote_notify(newNode->predecessor->Ip, newNode);
+    }
 
-    if (result != 0) {
-        printf("Error performing remote join\n");
-    } 
+    log_info("[INFO] Node %d has joined the ring via node at %s\n", 
+             newNode->id, existingNodeIp);
 }
 
 //First version of fix_fingers
@@ -965,20 +974,31 @@ void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
         return;
     }
 
-    char command[512];
-    snprintf(command, sizeof(command),
-        "ssh %s 'cd /home/mmagallanes && ./scripts/node_comms notify %d %s'",
-        remote_ip,
-        potentialPredecessor->id,
-        potentialPredecessor->Ip);
+    /* Build request: notify|<pred_id>|<pred_ip> */
+    char pred_id_str[16];
+    snprintf(pred_id_str, sizeof(pred_id_str), "%d", potentialPredecessor->id);
+    
+    const char* args[] = {pred_id_str, potentialPredecessor->Ip};
+    char* request = build_request(CMD_NOTIFY, args, 2);
+    
+    if (!request) {
+        log_error("[ERROR] remote_notify: Failed to build request\n");
+        return;
+    }
 
     log_info("[INFO] Notifying node at %s about predecessor %d\n", 
              remote_ip, potentialPredecessor->id);
 
-    int result = system(command);
-    if (result != 0) {
+    /* Send request via TCP */
+    char* response = tcp_request_response(remote_ip, DEFAULT_TCP_PORT, request);
+    free(request);
+
+    if (!response) {
         log_warn("[WARN] Remote notify to %s failed (may be unreachable)\n", remote_ip);
+        return;
     }
+
+    free(response);
 }
 
 //Uses remote communication to obtain the successor of local node with remote nodes and perform stabilization based on that information

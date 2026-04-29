@@ -80,7 +80,6 @@ int main() {
         // Process the command
         if (strcmp(input, "n") == 0) {
             // Join a new node to the network
-            // Implementation for joining a new node would go here
 
             printf("Enter IP of existing node to join: ");
 
@@ -92,18 +91,8 @@ int main() {
             strncpy(existingIp, input, sizeof(existingIp) - 1);
             existingIp[sizeof(existingIp) - 1] = '\0'; // Read the IP address of an existing node in the network
 
-            printf("Enter username of profile in existing node to join: ");
-
-            if (fgets(input, sizeof(input), stdin) == NULL) {
-                break; // Handle Ctrl+D (EOF)
-            }
-
-            char existingUser[16];
-            strncpy(existingUser, input, sizeof(existingUser) - 1);
-            existingUser[sizeof(existingUser) - 1] = '\0'; // Read the IP address of an existing node in the network
-
-            printf(existingUser);
-            remote_join(existingIp, existingUser,localNode);
+            printf("Joining node at %s...\n", existingIp);
+            remote_join(existingIp, "", localNode);  // Empty string for username (not used with TCP)
         }
         else if (strcmp(input, "t") == 0) {
             // Test chord ring structure

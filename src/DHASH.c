@@ -1,5 +1,7 @@
 #include "DHASH.h"
 #include "logger.h"
+#include "tcp_client.h"
+#include "tcp_protocol.h"
 
 /*
 Pending changes:
@@ -78,113 +80,171 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
 
 //SSH into another machine to consult their node information, returning a Node object 
 Node* remote_find_successor(const char* ip, int targetId) {
-    char command[512];
-
-    //Executes a system call, uses SSH to 
-    snprintf(command, sizeof(command),
-        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms find_successor %d\" 2>/dev/null",
-        ip,
-        targetId
-    );
-
-    FILE* fp = popen(command, "r");
-
-    if (!fp) {
-        log_error("SSH failed\n");
+    if (!ip) {
+        log_error("remote_find_successor: Invalid IP\n");
         return NULL;
     }
 
-    char line[256];
-    line[0] = '\0';
-    char tmp[256];
-
-    //Copies file to temporary char arrays
-    while (fgets(tmp, sizeof(tmp), fp)) {
-        if (tmp[0] != '\n' && tmp[0] != '\0')
-            memcpy(line, tmp, sizeof(line));
-    }
-
-    int id;
-    char remoteIp[16];
-
-    //If it returns a value different to 2, it did not succesfully assign a value to the 2 variables
-    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
-        log_error("Invalid response: %s\n", line);
-        pclose(fp);
+    /* Build request: find_successor|<targetId> */
+    char target_id_str[16];
+    snprintf(target_id_str, sizeof(target_id_str), "%d", targetId);
+    
+    const char* args[] = {target_id_str};
+    char* request = build_request(CMD_FIND_SUCCESSOR, args, 1);
+    
+    if (!request) {
         return NULL;
     }
 
-    pclose(fp);
+    /* Send request via TCP */
+    char* response = tcp_request_response(ip, DEFAULT_TCP_PORT, request);
+    free(request);
 
-    return createNode(id, remoteIp, "");
+    if (!response) {
+        log_error("remote_find_successor: No response from %s\n", ip);
+        return NULL;
+    }
+
+    /* Parse response: OK|<id>|<ip> */
+    char response_copy[TCP_BUFFER_SIZE];
+    strncpy(response_copy, response, sizeof(response_copy) - 1);
+    response_copy[sizeof(response_copy) - 1] = '\0';
+    free(response);
+
+    /* Remove trailing newline */
+    size_t len = strlen(response_copy);
+    if (len > 0 && response_copy[len - 1] == '\n') {
+        response_copy[len - 1] = '\0';
+    }
+
+    char* saveptr;
+    char* status = strtok_r(response_copy, "|", &saveptr);
+    
+    if (!status || strcmp(status, RESP_OK) != 0) {
+        log_error("remote_find_successor: Error response from %s\n", ip);
+        return NULL;
+    }
+
+    char* id_str = strtok_r(NULL, "|", &saveptr);
+    char* resp_ip = strtok_r(NULL, "|", &saveptr);
+
+    if (!id_str || !resp_ip) {
+        log_error("remote_find_successor: Invalid response format\n");
+        return NULL;
+    }
+
+    int id = atoi(id_str);
+    return createNode(id, resp_ip, "");
 }
 
 Node* remote_get_successor(const char* ip) {
-    char command[256];
-
-    //SSH command to external machine in network
-    snprintf(command, sizeof(command),
-        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms get_successor\" 2>/dev/null",
-        ip
-    );
-
-    FILE* fp = popen(command, "r");
-    if (!fp) return NULL;
-
-    char line[128];
-    line[0] = '\0';
-    char tmp[128];
-
-    // Keep reading until EOF, always preserving the last non-empty line
-    while (fgets(tmp, sizeof(tmp), fp)) {
-        if (tmp[0] != '\n' && tmp[0] != '\0')
-            memcpy(line, tmp, sizeof(line));
-    }
-
-    int id;
-    char remoteIp[16];
-
-    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
-        pclose(fp);
+    if (!ip) {
+        log_error("remote_get_successor: Invalid IP\n");
         return NULL;
     }
 
-    pclose(fp);
-    return createNode(id, remoteIp, "shared/files");
+    /* Build request: get_successor */
+    char* request = build_request(CMD_GET_SUCCESSOR, NULL, 0);
+    
+    if (!request) {
+        return NULL;
+    }
+
+    /* Send request via TCP */
+    char* response = tcp_request_response(ip, DEFAULT_TCP_PORT, request);
+    free(request);
+
+    if (!response) {
+        log_error("remote_get_successor: No response from %s\n", ip);
+        return NULL;
+    }
+
+    /* Parse response: OK|<id>|<ip> */
+    char response_copy[TCP_BUFFER_SIZE];
+    strncpy(response_copy, response, sizeof(response_copy) - 1);
+    response_copy[sizeof(response_copy) - 1] = '\0';
+    free(response);
+
+    /* Remove trailing newline */
+    size_t len = strlen(response_copy);
+    if (len > 0 && response_copy[len - 1] == '\n') {
+        response_copy[len - 1] = '\0';
+    }
+
+    char* saveptr;
+    char* status = strtok_r(response_copy, "|", &saveptr);
+    
+    if (!status || strcmp(status, RESP_OK) != 0) {
+        log_error("remote_get_successor: Error response from %s\n", ip);
+        return NULL;
+    }
+
+    char* id_str = strtok_r(NULL, "|", &saveptr);
+    char* resp_ip = strtok_r(NULL, "|", &saveptr);
+
+    if (!id_str || !resp_ip) {
+        log_error("remote_get_successor: Invalid response format\n");
+        return NULL;
+    }
+
+    int id = atoi(id_str);
+    return createNode(id, resp_ip, "shared/files");
 }
 
 Node* remote_closest_preceding_finger(const char* ip, int targetId) {
-    char command[256];
-
-    //SSH command to other machine in network
-    snprintf(command, sizeof(command),
-        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms closest_preceding_finger %d\" 2>/dev/null",
-        ip,
-        targetId
-    );
-
-    FILE* fp = popen(command, "r");
-    if (!fp) return NULL;
-
-    char line[128];
-    line[0] = '\0';
-    char tmp[128];
-
-    // Keep reading until EOF, always preserving the last non-empty line
-    while (fgets(tmp, sizeof(tmp), fp)) {
-        if (tmp[0] != '\n' && tmp[0] != '\0')
-            memcpy(line, tmp, sizeof(line));
-    }
-
-    int id;
-    char remoteIp[16];
-
-    //If it returns a value different to 2, it did not succesfully assign a value to the 2 variables
-    if (sscanf(line, "%d %15s", &id, remoteIp) != 2) {
-        pclose(fp);
+    if (!ip) {
+        log_error("remote_closest_preceding_finger: Invalid IP\n");
         return NULL;
     }
 
-    pclose(fp);
-    return createNode(id, remoteIp, "shared/files");
+    /* Build request: closest_preceding_finger|<targetId> */
+    char target_id_str[16];
+    snprintf(target_id_str, sizeof(target_id_str), "%d", targetId);
+    
+    const char* args[] = {target_id_str};
+    char* request = build_request(CMD_CLOSEST_PRECEDING_FINGER, args, 1);
+    
+    if (!request) {
+        return NULL;
+    }
+
+    /* Send request via TCP */
+    char* response = tcp_request_response(ip, DEFAULT_TCP_PORT, request);
+    free(request);
+
+    if (!response) {
+        log_error("remote_closest_preceding_finger: No response from %s\n", ip);
+        return NULL;
+    }
+
+    /* Parse response: OK|<id>|<ip> */
+    char response_copy[TCP_BUFFER_SIZE];
+    strncpy(response_copy, response, sizeof(response_copy) - 1);
+    response_copy[sizeof(response_copy) - 1] = '\0';
+    free(response);
+
+    /* Remove trailing newline */
+    size_t len = strlen(response_copy);
+    if (len > 0 && response_copy[len - 1] == '\n') {
+        response_copy[len - 1] = '\0';
+    }
+
+    char* saveptr;
+    char* status = strtok_r(response_copy, "|", &saveptr);
+    
+    if (!status || strcmp(status, RESP_OK) != 0) {
+        log_error("remote_closest_preceding_finger: Error response from %s\n", ip);
+        return NULL;
+    }
+
+    char* id_str = strtok_r(NULL, "|", &saveptr);
+    char* resp_ip = strtok_r(NULL, "|", &saveptr);
+
+    if (!id_str || !resp_ip) {
+        log_error("remote_closest_preceding_finger: Invalid response format\n");
+        return NULL;
+    }
+
+    int id = atoi(id_str);
+    return createNode(id, resp_ip, "shared/files");
 }
