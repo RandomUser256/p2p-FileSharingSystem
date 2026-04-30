@@ -307,6 +307,26 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         }
     }
 
+    else if (strcmp(cmd, "FIND_PREDECESSOR") == 0) {
+        int id;
+
+        if (sscanf(msg, "FIND_PREDECESSOR %d", &id) == 1) {
+            Node* temp = s->localNode;
+
+            while (!half_left_open_interval(temp->id, temp->id, temp->successor->id)) {
+                temp = remote_closest_preceding_finger(,temp->id)
+            }
+        } else {
+            send(cli->fd, "ERROR Invalid FIND_PREDECESSOR\n", 31, 0);
+        }
+    }
+
+    else if (strcmp(cmd, "CLOSEST_PRECEDING_FINGER") == 0) {
+        int id;
+
+        if (sscanf(msg, "CLOSEST_PRECEDING_FINGER %d %d", &id) == 1) {
+    }
+
     // --------------------
     // GET_NODE
     // --------------------

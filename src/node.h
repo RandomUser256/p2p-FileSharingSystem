@@ -52,7 +52,7 @@ Node* closest_preceding_finger(Node* node, int targetId);
 
 Node* remote_find_successor(const char* ip, int targetId);
 Node* remote_get_successor(const char* ip);
-Node* remote_closest_preceding_finger(const char* ip, int targetId);
+void remote_closest_preceding_finger(const char* ip, int targetId);
 void freeNode(Node* node);
 
 Node* find_predecessor(Node* startNode, int id);

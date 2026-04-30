@@ -6,6 +6,11 @@
 #include <math.h>
 #include <time.h>
 
+#include <netdb.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <stdbool.h>
+
 #include "node.h"
 #include "logger.h"
 //#include "DHASH.h"
@@ -777,6 +782,7 @@ void printFingerTable(Node* node) {
    - Query finger tables from remote nodes via SSH
    - Rebuild complete finger table structures from remote machine
 */
+/*
 void remote_print_finger_table(const char* ip) {
     char command[256];
     snprintf(command, sizeof(command),
@@ -860,13 +866,13 @@ void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
     pclose(fp);
     printf("[INFO] Remote finger table loaded successfully\n");
 }
-
+*/
 /* ======================================================================
    OPTIMIZED LOOKUP USING FINGER TABLES
    - Uses finger tables for O(log n) instead of O(n) lookups
    - Traverses nodes with finger table guidance
    ====================================================================== */
-
+/*
 Node* find_successor_with_finger_table(Node* node, int id) {
     if (!node) {
         return NULL;
@@ -955,10 +961,11 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
     log_warn("[WARN] Max hops reached in find_predecessor_with_finger_table\n");
     return cpf;
 }
-
+*/
 /* REMOTE NOTIFY - Notifies a remote node about a potential predecessor
    Used during stabilization to maintain ring consistency
    Sends predecessor info to remote node which updates and saves its predecessor */
+
 void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
     if (!remote_ip || !potentialPredecessor) {
         log_error("[ERROR] remote_notify: Invalid parameters\n");
@@ -1008,4 +1015,16 @@ void remote_stabilize(Node *node) {
     remote_notify(node->successor->Ip, node);
     
     freeNode(x);
+}
+
+/* ======================================================================
+   Chord functions for remote communication 
+   -
+   ====================================================================== */
+
+//Call from tcpServer
+void remote_closest_preceding_finger(const char* ip, int targetId) {
+    
+    
+    return NULL;
 }
