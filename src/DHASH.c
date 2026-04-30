@@ -1,6 +1,10 @@
 #include "DHASH.h"
 #include "logger.h"
 
+#include <netdb.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+
 /*
 Pending changes:
     - Implement correct hashing of file identifiers
@@ -76,6 +80,7 @@ void insert(Node* hostNode, char* identifier, char* sourceFilePath, int destinat
     }
 }
 
+/*
 //SSH into another machine to consult their node information, returning a Node object 
 Node* remote_find_successor(const char* ip, int targetId) {
     char command[512];
@@ -118,6 +123,72 @@ Node* remote_find_successor(const char* ip, int targetId) {
 
     return createNode(id, remoteIp, "");
 }
+*/
+
+//NOT FINISHESED, NOT IN USE CURRENTLY
+Node* remote_find_successor(const char* ip, int port, int id) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return NULL;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
+        perror("inet_pton");
+        close(sock);
+        return NULL;
+    }
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("connect");
+        close(sock);
+        return NULL;
+    }
+
+    // 🔴 Send request
+    char request[64];
+    snprintf(request, sizeof(request), "FIND_SUCCESSOR %d\n", id);
+
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return NULL;
+    }
+
+    // 🔴 Receive response
+    char response[128];
+
+    //Waits for response from server
+    int n = recv(sock, response, sizeof(response) - 1, 0);
+    if (n <= 0) {
+        perror("recv");
+        close(sock);
+        return NULL;
+    }
+
+    response[n] = '\0';
+
+    // 🔴 Parse response: "NODE <id> <ip>"
+    int node_id;
+    char node_ip[64];
+
+    if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
+        close(sock);
+        return createNode(node_id, node_ip, "");
+    }
+
+    // Handle error response
+    if (strncmp(response, "ERROR", 5) == 0) {
+        fprintf(stderr, "RPC error: %s\n", response);
+    }
+
+    close(sock);
+    return NULL;
+}
 
 Node* remote_get_successor(const char* ip) {
     char command[256];
@@ -153,6 +224,7 @@ Node* remote_get_successor(const char* ip) {
     return createNode(id, remoteIp, "shared/files");
 }
 
+ /*
 Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     char command[256];
 
@@ -187,4 +259,70 @@ Node* remote_closest_preceding_finger(const char* ip, int targetId) {
 
     pclose(fp);
     return createNode(id, remoteIp, "shared/files");
+}*/
+
+Node* remote_find_predecessor()
+
+Node* remote_find_successor(const char* ip, int port, int id) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return NULL;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
+        perror("inet_pton");
+        close(sock);
+        return NULL;
+    }
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("connect");
+        close(sock);
+        return NULL;
+    }
+
+    // 🔴 Send request
+    char request[64];
+    snprintf(request, sizeof(request), "CLOSEST_PRECEDING_FINGER %d\n", id);
+
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return NULL;
+    }
+
+     // 🔴 Receive response
+    char response[128];
+
+    //Waits for response from server
+    int n = recv(sock, response, sizeof(response) - 1, 0);
+    if (n <= 0) {
+        perror("recv");
+        close(sock);
+        return NULL;
+    }
+
+    response[n] = '\0';
+
+    // 🔴 Parse response: "NODE <id> <ip>"
+    int node_id;
+    char node_ip[64];
+
+    if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
+        close(sock);
+        return createNode(node_id, node_ip, "");
+    }
+
+    // Handle error response
+    if (strncmp(response, "ERROR", 5) == 0) {
+        fprintf(stderr, "RPC error: %s\n", response);
+    }
+
+    close(sock);
+    return NULL;
 }
