@@ -314,6 +314,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
             Node* temp = s->localNode;
 
             while (!half_left_open_interval(temp->id, temp->id, temp->successor->id)) {
+
                 temp = remote_closest_preceding_finger(,temp->id)
             }
         } else {
@@ -324,7 +325,15 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     else if (strcmp(cmd, "CLOSEST_PRECEDING_FINGER") == 0) {
         int id;
 
-        if (sscanf(msg, "CLOSEST_PRECEDING_FINGER %d %d", &id) == 1) {
+        if (sscanf(msg, "CLOSEST_PRECEDING_FINGER %d", &id) == 1) {
+            Node* cpf = closest_preceding_finger(s->localNode, id);
+
+            char buf[128];
+            snprintf(buf, sizeof(buf), "NODE %d %s\n", cpf->id, cpf->Ip);
+            send(cli->fd, buf, strlen(buf), 0);
+        } else {
+            send(cli->fd, "ERROR Invalid CLOSEST_PRECEDING_FINGER\n", 31, 0);
+        }
     }
 
     // --------------------
@@ -332,8 +341,8 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     // --------------------
     else if (strcmp(cmd, "GET_NODE") == 0) {
         char buf[128];
-        snprintf(buf, sizeof(buf), "NODE %d %s\n",
-                 s->localNode->id, s->localNode->Ip);
+        snprintf(buf, sizeof(buf), "NODE %d %s %d %s %d %s\n",
+                 s->localNode->id, s->localNode->Ip, s->localNode->successor->id, s->localNode->successor->Ip, s->localNode->predecessor->id, s->localNode->predecessor->Ip);
         send(cli->fd, buf, strlen(buf), 0);
     }
 
@@ -350,7 +359,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     }
 }
 
-
+/*
 int main(int ac, char **av) {
     if (ac != 2) {
         write(2, "Wrong number of argument\n", 26);
@@ -368,3 +377,4 @@ int main(int ac, char **av) {
     }
     return (0);
 }
+    */

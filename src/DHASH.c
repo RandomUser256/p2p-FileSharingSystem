@@ -125,7 +125,7 @@ Node* remote_find_successor(const char* ip, int targetId) {
     return createNode(id, remoteIp, "");
 }
 */
-
+/*
 bool init_socket(const char* ip, int sock, int port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -151,14 +151,12 @@ bool init_socket(const char* ip, int sock, int port) {
 
     return true;
 }
-
-Node* get_node(const char *ip, int port, int id) {
-
-}
+*/
 
 //NOT FINISHESED, NOT IN USE CURRENTLY
+/*
 Node* remote_find_successor(const char* ip, int port, int id) {
-    /*
+    
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         perror("socket");
@@ -180,7 +178,7 @@ Node* remote_find_successor(const char* ip, int port, int id) {
         close(sock);
         return NULL;
     }
-    */
+    
     int sock = 0;
     if (!init_socket(ip, sock, port)) {
     return NULL;
@@ -197,12 +195,12 @@ Node* remote_find_successor(const char* ip, int port, int id) {
     }
 
     // 🔴 Receive response
-    /*
+    
     char response[128];
 
     //Waits for response from server
     int n = recv(sock, response, sizeof(response) - 1, 0);
-*/
+
     char response[128];
     int total = 0;
 
@@ -244,7 +242,8 @@ Node* remote_find_successor(const char* ip, int port, int id) {
     close(sock);
     return NULL;
 }
-
+*/
+/*
 Node* remote_get_successor(const char* ip) {
     char command[256];
 
@@ -278,6 +277,7 @@ Node* remote_get_successor(const char* ip) {
     pclose(fp);
     return createNode(id, remoteIp, "shared/files");
 }
+    */
 
  /*
 Node* remote_closest_preceding_finger(const char* ip, int targetId) {
@@ -316,10 +316,9 @@ Node* remote_closest_preceding_finger(const char* ip, int targetId) {
     return createNode(id, remoteIp, "shared/files");
 }*/
 
-Node* remote_find_predecessor(const char* ip, int port, int id) {
+//Node* remote_find_predecessor(const char* ip, int port, int id) {}
 
-}
-
+/*
 Node* remote_closest_preceding_finger(Node* , int id) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
@@ -383,3 +382,4 @@ Node* remote_closest_preceding_finger(Node* , int id) {
     close(sock);
     return NULL;
 }
+    */

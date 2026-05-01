@@ -1,13 +1,19 @@
 #include <math.h>
 #include <time.h>
+#include <pthread.h>
+
 #include "src/DHASH.h"
 #include "src/node.h"
 #include "src/maintenance.h"
 #include "src/logger.h"
+#include "src/tcpServer.h"
+
 
 /*
 NOTE: Compile all source files together:
 gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c -o main -lm
+
+gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c -o main -pthread -lm
 
 This compiles:
   - main.c (your program)
@@ -31,10 +37,27 @@ TODO
 int main() {
     set_log_level(LOG_NONE); // Set to LOG_INFO or LOG_DEBUG for more detailed output
 
-    char input[100];
-
+    
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
     loadFingerTableFromFile(localNode, "nodeInfo/FingerTable");
+
+    int defaultPort = 8080;
+    if (defaultPort <= 0 || defaultPort > 65535) fatalError(NULL);
+    t_server *serv = initServer(port, localNode);
+
+    pthread_t server_tid;
+
+    pthread_create(&server_tid, NULL, server_loop, serv);
+
+    if (serv) {
+        createSock(serv);
+        configAddr(serv);
+        bindAndListen(serv);
+        handleCon(serv);
+        deleteAll(serv);
+    }
+
+    char input[100];
 
     if (localNode == NULL) {
         printf("Error, couldn't load node correctly\n");
@@ -58,7 +81,7 @@ int main() {
 
     
     // Background service that maintains chord ring integrity
-    MaintenanceThread* mt = start_maintenance_thread(localNode, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
+    MaintenanceThread* mt = start_maintenance_thread(serv, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
 
     printf("\n╔════════════════════════════════════════════════════════════╗\n");
     printf("║  Chord Node %d Started with Background Maintenance       ║\n", localNode->id);
@@ -92,11 +115,15 @@ int main() {
             existingIp[sizeof(existingIp) - 1] = '\0'; // Read the IP address of an existing node in the network
 
             printf("Joining node at %s...\n", existingIp);
-            remote_join(existingIp, "", localNode);  // Empty string for username (not used with TCP)
+
+
+            remote_join(existingIp, 8080, serv);  // Empty string for username (not used with TCP)
         }
         else if (strcmp(input, "t") == 0) {
             // Test chord ring structure
-            remote_check_ring(localNode, localNode->successor->Ip);
+            //remote_check_ring(localNode, localNode->successor->Ip);
+            //Node* temp = remote_find_successor()
+
         } else if (strcmp(input, "g") == 0) {
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
             // Get current node information

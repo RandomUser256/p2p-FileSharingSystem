@@ -254,9 +254,9 @@ Node* closest_preceding_finger(Node* node, int targetId) {
 }
 
 
-Node* remote_find_successor(const char* ip, int targetId);
-Node* remote_get_successor(const char* ip);
-Node* remote_closest_preceding_finger(const char* ip, int targetId);
+//Node* remote_find_successor(const char* ip, int targetId);
+//Node* remote_get_successor(const char* ip);
+//Node* remote_closest_preceding_finger(const char* ip, int targetId);
 
 void freeNode(Node* node) {
     if (node != NULL) {
@@ -264,6 +264,7 @@ void freeNode(Node* node) {
     }
 }
 
+/*
 Node* find_predecessor(Node* startNode, int id) {
     if (!startNode || !startNode->successor) {
         printf("Local node has no successor loaded\n");
@@ -345,7 +346,26 @@ Node* find_predecessor(Node* startNode, int id) {
     freeNode(n);
     return NULL;
 }
+    */
+Node* find_predecessor(Node* node, int targetId) {
+    if (!node) {
+        return NULL;
+    }
 
+    Node* n = node;
+
+    while (!half_left_open_interval(targetId, n->id, n->successor->id)) {
+        Node* next = closest_preceding_finger(n, targetId);
+
+        if (next == n) break;  // prevent infinite loop
+
+        n = next;
+    }
+
+    return n;
+}
+
+/*
 //Chord algorithm successor check
 Node* find_successor(Node* node, int id) {
     Node* pred = find_predecessor(node, id);
@@ -353,7 +373,19 @@ Node* find_successor(Node* node, int id) {
     if (pred == NULL) return NULL;
 
     return remote_get_successor(pred->Ip);
-}
+}*/
+
+Node* find_successor(Node* node, int targetId) {
+    if (!node) {
+        return NULL;
+    }
+
+    Node* pred = find_predecessor(node, targetId);
+    if (pred != NULL) {
+        return pred->successor; // The successor of the predecessor is the successor of the target ID
+    }
+    return NULL; // If no predecessor is found, return NULL
+} 
 
 //Functions for inserting a new node into the network and updating the finger tables of existing nodes
 Node* init_finger_table(Node* existingNode, Node* newNode) {
@@ -443,39 +475,6 @@ void join(Node* existingNode, Node* newNode) {
     }
 
     saveNodeToFile(existingNode, "nodeInfo/Node"); //Saves changes in local node to disk for persistence
-}
-
-//Remotely updates ring structure to include new node. Has to be called by new node wanting to join the network
-//Must know beforehand the IP of an existing node in the network to perform the join operation
-void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node* newNode) {
-    if (!newNode) {
-        return;
-    }
-
-    Node* remoteSuccessor = remote_find_successor(existingNodeIp, newNode->id); // Find the successor of the new node using the existing node as a reference point through remote communication
-
-    newNode->successor = remoteSuccessor; // Update the successor of the new node to point to the successor obtained through remote communication
-    newNode->predecessor = remoteSuccessor->predecessor; // Update the predecessor of the new node to point to the predecessor of the successor obtained through remote communication
-
-    if (remoteSuccessor->predecessor != NULL) {
-        remoteSuccessor->predecessor->successor = newNode; // Update the successor of the predecessor of the successor obtained through remote communication to point to the new node
-    }
-
-    remoteSuccessor->predecessor = newNode; // Update the predecessor of the successor obtained through remote communication to point to the new node
-
-    char command[256];
-    snprintf(command, sizeof(command),
-         "ssh %s@%s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
-         existingNodeUser,
-         existingNodeIp,
-         newNode->id,
-         newNode->Ip);
-
-    int result = system(command); // Execute the command to perform the join operation on the remote node
-
-    if (result != 0) {
-        printf("Error performing remote join\n");
-    } 
 }
 
 //First version of fix_fingers
@@ -581,18 +580,8 @@ void check_ring(Node* start) {
     } while (curr != start);
 }
 
+/*
 void remote_check_ring(Node* start, const char* ip) {
-    /*
-    char command[256];
-
-    int ringId = start->id; // Assuming the ring ID is the same as the node ID for simplicity
-
-    char buffer[50];
-
-    strcpy(buffer, ip); // Copy the IP address to a local variable to avoid modifying the original string
-
-    char* ringIp = buffer;
-    */
     Node* ringChecker = start;
 
     //  "Ring check passed for node %d at IP %s\n", node->id, node->Ip);
@@ -600,33 +589,22 @@ void remote_check_ring(Node* start, const char* ip) {
         Node* succPred = remote_closest_preceding_finger(ringChecker->Ip, ringChecker->successor->id); // Get the closest preceding finger for the current node to check the ring structure
         Node* predSucc = remote_find_successor(ringChecker->Ip, ringChecker->predecessor->id); // Get the successor of the predecessor of the current node to check the ring structure
 
-        if (/*ringChecker->successor->predecessor*/ succPred != ringChecker) {
+        if ( succPred != ringChecker) {
             log_error("ERROR: successor->predecessor mismatch at node %d\n", ringChecker->id);
             return;
         }
-        if (/*ringChecker->predecessor->successor*/ predSucc != ringChecker) {
+        if ( predSucc != ringChecker) {
             log_error("ERROR: predecessor->successor mismatch at node %d\n", ringChecker->id);
             return;
         }
 
-        /*snprintf(command, sizeof(command), "ssh %s \"./scripts/node_comms check_ring\" 2>/dev/null", ringIp);
-
-        ringId = system(command); // Execute the command and capture the return value (ring ID)
-
-        if (ringId == -1) {
-            log_error("[ERROR] Ring check failed for node %d at IP %s\n", ringId, ip);
-            break;
-        }
-
-        //sscanf(result, "%d %15s", &ringId, ringIp); // Parse the result to extract the ring ID and IP address
-        */
         printf("[INFO] Ring check passed for node %d %s\n", ringChecker->id, ringChecker->Ip);
 
-        //ringIp = start->successor->Ip; // Move to the next node in the ring using the successor's IP address
         ringChecker = remote_find_successor(ringChecker->Ip, ringChecker->successor->id); // Move to the next node in the ring using the successor's IP address
     }
     while (ringChecker != start); // Loop until we have checked the entire ring
 }
+*/
 
 //Not in use currently
 void executeSSH(const char* ip, const char* command) {
@@ -964,7 +942,7 @@ Node* find_predecessor_with_finger_table(Node* node, int id) {
 */
 /* REMOTE NOTIFY - Notifies a remote node about a potential predecessor
    Used during stabilization to maintain ring consistency
-   Sends predecessor info to remote node which updates and saves its predecessor */
+   Sends predecessor info to remote node which updates and saves its predecessor 
 
 void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
     if (!remote_ip || !potentialPredecessor) {
@@ -987,7 +965,9 @@ void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
         log_warn("[WARN] Remote notify to %s failed (may be unreachable)\n", remote_ip);
     }
 }
+    */
 
+/*
 //Uses remote communication to obtain the successor of local node with remote nodes and perform stabilization based on that information
 void remote_stabilize(Node *node) {
     if (!node || !node->successor) {
@@ -1016,15 +996,322 @@ void remote_stabilize(Node *node) {
     
     freeNode(x);
 }
+*/
 
 /* ======================================================================
    Chord functions for remote communication 
    -
    ====================================================================== */
 
+int init_socket(const char* ip, int port) {
+    int sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        perror("socket");
+        return 0;
+    }
+
+    struct sockaddr_in addr;
+    addr.sin_family = AF_INET;
+    addr.sin_port = htons(port);
+
+    if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
+        perror("inet_pton");
+        close(sock);
+        return 0;
+    }
+
+    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        perror("connect");
+        close(sock);
+        return 0;
+    }
+
+    return sock;
+}
+
+//Allows you to retrieve full node information from an Ip
+Node* remote_get_node(t_server* s, int port, const char* ip) {
+    int sock = init_socket(ip, port);
+
+    // 🔴 Send request
+    char request[64];
+    snprintf(request, sizeof(request), "GET_NODE\n", targetId);
+
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return NULL;
+    }
+
+    // 🔴 Receive response
+    char response[128];
+    int total = 0;
+
+    int n = 0;
+
+    //Extract response from server
+    while (1) {
+        n = recv(sock, response + total, sizeof(response) - total - 1, 0);
+        if (n <= 0) break;
+
+        total += n;
+        response[total] = '\0';
+
+        if (strchr(response, '\n')) break; // end of message
+    }
+
+    if (n <= 0) {
+        perror("recv");
+        close(sock);
+        return NULL;
+    }
+
+    response[n] = '\0';
+
+
+    int node_id;
+    char node_ip[64];
+    int succ_id;
+    char succ_ip[64];
+    int pred_id;
+    char pred_ip[64];
+
+    Node* temp;
+
+    //Parses information from response into temp variables
+    if (sscanf(response, "NODE %d %63s %d %63s %d %s", &node_id, node_ip, &succ_id, succ_ip, &pred_id, pred_ip) == 6) {
+        temp = createNode(node_id, node_ip, "shared/files");
+        temp->successor = createNode(succ_id, succ_ip, "shared/files");
+        temp->predecessor = createNode(pred_id, pred_ip, "shared/files")
+    } else {
+        fprintf(stderr, "RPC error: %s\n", response);
+        close(sock);
+        return NULL;
+    }
+
+    close(sock);
+
+    return temp;
+}
+
 //Call from tcpServer
-void remote_closest_preceding_finger(const char* ip, int targetId) {
+Node* remote_find_predecessor(t_server* s, int port, int targetId) {
+    // The result would be parsed and returned as a Node object
+    Node* predecessor = s->localNode;
+
+    while (!half_left_open_interval(s->localNode->id, predecessor->id, predecessor->successor->id)) {
+        if (s->localNode->Ip == predecessor->Ip) {
+            predecessor = closest_preceding_finger(s->localNode, targetId);
+        } else {
+            //Checks if init socket fails and returns NULL if it does
+            int sock = init_socket(predecessor->Ip, port);
+            if (!sock) {
+                return NULL;
+            }
+            
+            // 🔴 Send request
+            char request[64];
+            snprintf(request, sizeof(request), "CLOSEST_PRECEDING_FINGER %d\n", targetId);
+
+            if (send(sock, request, strlen(request), 0) < 0) {
+                perror("send");
+                close(sock);
+                return NULL;
+            }
+
+            // 🔴 Receive response
+            char response[128];
+            int total = 0;
+
+            int n = 0;
+
+            //Extract response from server
+            while (1) {
+                n = recv(sock, response + total, sizeof(response) - total - 1, 0);
+                if (n <= 0) break;
+
+                total += n;
+                response[total] = '\0';
+
+                if (strchr(response, '\n')) break; // end of message
+            }
+
+            if (n <= 0) {
+                perror("recv");
+                close(sock);
+                return NULL;
+            }
+
+            response[n] = '\0';
+
+
+            int node_id;
+            char node_ip[64];
+
+            if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
+                predecessor = createNode(node_id, node_ip, "shared/files");
+            } else {
+                fprintf(stderr, "RPC error: %s\n", response);
+                close(sock);
+                return NULL;
+            }
+
+            //Checks if predecessor is a valid node
+            if (predecessor == NULL) {
+                log_error("Failed to create node from closes finger response: %s\n", response);
+                break;
+            }
+
+            close(sock);
+        }
+    }
     
+    return predecessor;
+}
+
+Node* remote_find_successor(t_server* s, int port, int targetId) {
+    Node* temp = remote_find_predecessor(s, port, targetId);
+
+    Node* succ = remote_get_node(s, port, temp->successor->Ip);
+
+    return succ;
+}
+
+/*
+//Remotely updates ring structure to include new node. Has to be called by new node wanting to join the network
+//Must know beforehand the IP of an existing node in the network to perform the join operation
+void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node* newNode) {
+    if (!newNode) {
+        return;
+    }
+
+    Node* remoteSuccessor = remote_find_successor(existingNodeIp, newNode->id); // Find the successor of the new node using the existing node as a reference point through remote communication
+
+    newNode->successor = remoteSuccessor; // Update the successor of the new node to point to the successor obtained through remote communication
+    newNode->predecessor = remoteSuccessor->predecessor; // Update the predecessor of the new node to point to the predecessor of the successor obtained through remote communication
+
+    if (remoteSuccessor->predecessor != NULL) {
+        remoteSuccessor->predecessor->successor = newNode; // Update the successor of the predecessor of the successor obtained through remote communication to point to the new node
+    }
+
+    remoteSuccessor->predecessor = newNode; // Update the predecessor of the successor obtained through remote communication to point to the new node
+
+    char command[256];
+    snprintf(command, sizeof(command),
+         "ssh %s@%s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
+         existingNodeUser,
+         existingNodeIp,
+         newNode->id,
+         newNode->Ip);
+
+    int result = system(command); // Execute the command to perform the join operation on the remote node
+
+    if (result != 0) {
+        printf("Error performing remote join\n");
+    } 
+}
+    */
+
+void remote_join(const char* existingIp, int port, t_server* s) {
+    int sock = init_socket(existingIp, port);
+    if (!sock) {
+        return;
+    }
+
+    s->localNode->predecessor = NULL;
+
+    Node* tempSucc = remote_find_successor(s, sock, port, s->localNode->id);
+
+    s->localNode->successor = tempSucc; 
+
+    close(sock);
+
+    return;
+}
+
+
+void remote_notify(t_server* s, int port, const char* existingIp) {
+    int sock = init_socket(existingIp, port);
+
+    if (!sock) {
+        return;
+    }
     
-    return NULL;
+    if (existingIp == s->localNode->Ip) {
+        if (s->localNode->predecessor == NULL || in_open_interval(s->localNode->id, s->localNode->predecessor->id, s->localNode->id)) {
+            s->localNode->predecessor = s->localNode->id;
+        }
+
+        return;
+    }
+
+    Node* otherNode = remote_get_node(s, port, existingIp);
+
+    if (s->localNode->predecessor == NULL || in_open_interval(otherNode->id, s->localNode->predecessor->id, s->localNode->id)) {
+        s->localNode->predecessor = otherNode;
+    }
+
+    close(sock);
+
+    return;
+}
+
+void remote_stabilize(t_server* s, int port) {
+    Node* temp = remote_get_node(s, port, s->localNode->successor->Ip);
+
+    Node* x = temp->predecessor;
+
+    if (in_open_interval(x->id, s->localNode->id, temp->id)) {
+        s->localNode->successor = x;
+    }
+
+    int sock = init_socket(s->localNode->successor->Ip, s->port);
+
+    if (!sock) {
+        return;
+    }
+
+    // 🔴 Send request
+    char request[64];
+    snprintf(request, sizeof(request), "STABILIZE %s\n", s->localNode->Ip);
+
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return NULL;
+    }
+
+    // 🔴 Receive response
+    char response[128];
+    int total = 0;
+
+    int n = 0;
+
+    //Extract response from server
+    while (1) {
+        n = recv(sock, response + total, sizeof(response) - total - 1, 0);
+        if (n <= 0) break;
+
+        total += n;
+        response[total] = '\0';
+
+        if (strchr(response, '\n')) break; // end of message
+    }
+
+    if (n <= 0) {
+        perror("recv");
+        close(sock);
+        return NULL;
+    }
+
+    response[n] = '\0';
+
+    //Parses information from response into temp variables
+    if (response != "OK\n") {
+        log_error(response);
+    }
+
+    close(sock);
+
+    return;
 }

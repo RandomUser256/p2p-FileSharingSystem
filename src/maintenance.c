@@ -1,8 +1,10 @@
-#include "maintenance.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
+
 #include "logger.h"
+#include "maintenance.h"
+
 
 //Function that loops in the background
 //Checks for time intervals to routinely execute remote_stabilize() and fix_fingers()
@@ -18,7 +20,12 @@ void* maintanance_worker(void* arg) {
 
         //Checks time intervals to execute stabilization
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000) {
-            remote_stabilize(mt->node);
+            //Assuming all machines use same port
+            pthread_mutex_lock(&s->lock);
+
+            remote_stabilize(mt->localServer, mt->localServer->port);
+
+            pthread_mutex_unlock(&s->lock);
 
             last_stabilized_time = now;
 
@@ -27,25 +34,25 @@ void* maintanance_worker(void* arg) {
 
         //Checks time intervals to execute fix_fingers()
         if ((now-last_fixed_time) >= mt->fix_fingers_interval_ms / 1000) {
-            fix_fingers(mt->node);
+            fix_fingers(mt->localServer->localNode);
 
             last_fixed_time = now;
 
-            log_info("[MAINTENANCE] Fix fingers completed for Node %d\n", mt->node->id);
+            log_info("[MAINTENANCE] Fix fingers completed for Node %d\n", mt->localServer->localNode->id);
         }
 
         usleep(50000); // Sleep for stabilize interval
     }
 
-    log_info("[MAINTENANCE] Background thread stopping for Node %d\n", mt->node->id);
+    log_info("[MAINTENANCE] Background thread stopping for Node %d\n", mt->localServer->localNode->id);
 
     return NULL;
 }
 
 //Initializes a MaintenanceThread object, assigns time interval values, creates process thread and logs the start of the thread
-MaintenanceThread* start_maintenance_thread(Node* node, int stabilize_interval_ms, int fix_fingers_interval_ms) {
+MaintenanceThread* start_maintenance_thread(t_server* localServer, int stabilize_interval_ms, int fix_fingers_interval_ms) {
     MaintenanceThread* mt = malloc(sizeof(MaintenanceThread));
-    mt->node = node;
+    mt->localServer = localServer;
     mt->stabilize_interval_ms = stabilize_interval_ms;
     mt->fix_fingers_interval_ms = fix_fingers_interval_ms;
     mt->running = 1;
@@ -58,7 +65,7 @@ MaintenanceThread* start_maintenance_thread(Node* node, int stabilize_interval_m
     }
 
     log_info("[Maintenance] Started background thread for Node %d \n",
-           node->id);
+           localServer->localNode->id);
 
     return mt;
 }
@@ -75,7 +82,7 @@ void stop_maintenance_thread(MaintenanceThread* mt) {
     sleep(1); // Give the thread time to exit
 
     log_info("[Maintenance] Stopped background thread for Node %d \n",
-           mt->node->id);
+           mt->localServer->localNode->id);
     free(mt);
     sleep(1); // Ensure thread has time to clean up
 }
