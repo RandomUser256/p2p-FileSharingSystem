@@ -7,6 +7,8 @@ tutorial for code: https://medium.com/@oduwoledare/server-side-story-creating-a-
 */
 
 #include "tcpServer.h"
+#include "logger.h"
+#include "node.h"
 
 void fatalError(t_server *s);
 void handle_command(t_server *s, t_client *cli, char *msg);
@@ -166,7 +168,7 @@ void deregisterClient(t_server *s, int fd, int cli_id) {
     removeClient(s, fd);
 }
 
-//Processes a message received from a client, extracting complete messages and sending them to all other clients
+//Processes a message received from a client, extracting complete messages and sends response to client
 void processMessage(t_server *s, int fd) {
     char buf[4096];
     t_client *cli = findClient(s, fd);
@@ -286,8 +288,10 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     int defaultSock = cli->id;
     int defaultPort = 8080;
 
-    if (sscanf(msg, "%63s", cmd) != 1)
+    if (sscanf(msg, "%63s", cmd) != 1) {
+        log_error("Invalid command received by tcp server");
         return;
+    }
 
     // --------------------
     // JOIN
@@ -296,7 +300,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         char ip[64];
 
         if (sscanf(msg, "JOIN %63s", ip) == 1) {
-            remote_join(ip, s->localNode);  // your existing function
+            remote_join(ip, s->port, s);  // your existing function
             send(cli->fd, "OK\n", 3, 0);
         } else {
             send(cli->fd, "ERROR Invalid JOIN\n", 19, 0);
@@ -306,7 +310,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     else if (strcmp(cmd, "STABILIZE") == 0) {
         char* existingIp;
         if (sscanf(msg, "STABILIZE %63s", existingIp) == 1) {
-            remote_notify(s, defaultSock, defaultPort, existingIp)
+            remote_notify(s, defaultPort, existingIp);
             send(cli->fd, "OK\n", 3, 0);
         }
         send(cli->fd, "Invalid arguments given for stabilize\n", 3, 0);
@@ -319,10 +323,16 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         int id;
 
         if (sscanf(msg, "FIND_SUCCESSOR %d", &id) == 1) {
+            pthread_mutex_lock(&s->lock);
             Node* succ = find_successor(s->localNode, id);
+            int succ_id = succ->id;
+            char succ_ip[64];
+            strncpy(succ_ip, succ->Ip, sizeof(succ_ip) - 1);
+            succ_ip[sizeof(succ_ip) - 1] = '\0';
+            pthread_mutex_unlock(&s->lock);
 
             char buf[128];
-            snprintf(buf, sizeof(buf), "NODE %d %s\n", succ->id, succ->Ip);
+            snprintf(buf, sizeof(buf), "NODE %d %s\n", succ_id, succ_ip);
             send(cli->fd, buf, strlen(buf), 0);
         } else {
             send(cli->fd, "ERROR Invalid FIND_SUCCESSOR\n", 31, 0);
@@ -352,10 +362,16 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         int id;
 
         if (sscanf(msg, "CLOSEST_PRECEDING_FINGER %d", &id) == 1) {
+            pthread_mutex_lock(&s->lock);
             Node* cpf = closest_preceding_finger(s->localNode, id);
+            int cpf_id = cpf->id;
+            char cpf_ip[64];
+            strncpy(cpf_ip, cpf->Ip, sizeof(cpf_ip) - 1);
+            cpf_ip[sizeof(cpf_ip) - 1] = '\0';
+            pthread_mutex_unlock(&s->lock);
 
             char buf[128];
-            snprintf(buf, sizeof(buf), "NODE %d %s\n", cpf->id, cpf->Ip);
+            snprintf(buf, sizeof(buf), "NODE %d %s\n", cpf_id, cpf_ip);
             send(cli->fd, buf, strlen(buf), 0);
         } else {
             send(cli->fd, "ERROR Invalid CLOSEST_PRECEDING_FINGER\n", 31, 0);
@@ -366,22 +382,74 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     // GET_NODE
     // --------------------
     else if (strcmp(cmd, "GET_NODE") == 0) {
+        pthread_mutex_lock(&s->lock);
+        int node_id = s->localNode->id;
+        char node_ip[64];
+        strncpy(node_ip, s->localNode->Ip, sizeof(node_ip) - 1);
+        node_ip[sizeof(node_ip) - 1] = '\0';
+        int succ_id = s->localNode->successor->id;
+        char succ_ip[64];
+        strncpy(succ_ip, s->localNode->successor->Ip, sizeof(succ_ip) - 1);
+        succ_ip[sizeof(succ_ip) - 1] = '\0';
+        int pred_id = s->localNode->predecessor->id;
+        char pred_ip[64];
+        strncpy(pred_ip, s->localNode->predecessor->Ip, sizeof(pred_ip) - 1);
+        pred_ip[sizeof(pred_ip) - 1] = '\0';
+        pthread_mutex_unlock(&s->lock);
+        
         char buf[128];
-        snprintf(buf, sizeof(buf), "NODE %d %s %d %s %d %s\n",
-                 s->localNode->id, s->localNode->Ip, s->localNode->successor->id, s->localNode->successor->Ip, s->localNode->predecessor->id, s->localNode->predecessor->Ip);
+        snprintf(buf, sizeof(buf), "NODE %d %.15s %d %.15s %d %.15s\n",
+                 node_id, node_ip, succ_id, succ_ip, pred_id, pred_ip);
         send(cli->fd, buf, strlen(buf), 0);
     }
 
     // --------------------
     // CHECK_RING
     // --------------------
-    /*
     else if (strcmp(cmd, "CHECK_RING") == 0) {
-        remote_check_ring(s->localNode, s->localNode->Ip);
-        send(cli->fd, "OK\n", 3, 0);
-    }
-        */
+        int startingNode = 0; //Node that started the check ring command, used to stop when returning to it
 
+        if (sscanf(msg, "CHECK_RING %d", &startingNode) == 1) {
+            //Ends check ring loop if loops back to original node
+            if (s->localNode->id == startingNode) {
+                log_info("Completed ring check at node %d with IP: %s", s->localNode->id, s->localNode->Ip);
+            }
+
+            Node* tempSucc = remote_get_node(s, s->port, s->localNode->successor->Ip);
+            Node* tempPred = remote_get_node(s, s->port, s->localNode->predecessor->Ip);
+
+            if (tempSucc->id != s->localNode->id) {
+                log_error("[ERROR] successor->predecessor mismatch at node %d\n", s->localNode->id);
+            }
+            if (tempPred->id != s->localNode->id) {
+                log_error("[ERROR] predecessor->successor mismatch at node %d\n", s->localNode->id);
+            }
+
+            pthread_mutex_lock(&s->lock);
+            int sock = init_socket(tempSucc->Ip, s->port);
+            pthread_mutex_unlock(&s->lock);
+
+            if (!sock) {
+                log_error("Could not initiate socket to node %d in IP: ", tempSucc->id, tempSucc->Ip);
+                return;
+            }
+
+            // Send CHECK_RING to following node in the ring
+            char request[64];
+            snprintf(request, sizeof(request), "CHECK_RING %d\n", startingNode);
+
+            if (send(sock, request, strlen(request), 0) < 0) {
+                perror("send");
+                close(sock);
+                return;
+            }
+
+            close(sock);
+        } else {
+            log_warn("Invalid CHECK_RING command at node %d", s->localNode->id);
+            return;
+        }
+    }
     else {
         send(cli->fd, "ERROR Unknown command\n", 23, 0);
     }

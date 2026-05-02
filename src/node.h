@@ -2,7 +2,9 @@
 #define NODE_H
 
 #include <stdbool.h>
-#include "tcpServer.h"
+
+//#include "tcpServer.h"
+typedef struct s_server t_server;
 
 #define MAX_IP_LENGTH 16
 #define MAX_FILE_PATH_LENGTH 256
@@ -46,15 +48,10 @@ Node* createNode(int id, const char* ip, const char* fileContentPath);
 void saveFingerTableToFile(Node* node, const char* filepath);
 void saveNodeToFile(Node* node, const char* filepath);
 Node* loadNodeFromFile(const char* filepath);
-void saveNodeToFile(Node* node, const char* filepath);
 
 Node* createNode(int id, const char* ip, const char* fileContentPath);
+Node* copyNode(Node* node);
 Node* closest_preceding_finger(Node* node, int targetId);
-
-
-//Node* remote_get_successor(const char* ip);
-//void remote_closest_preceding_finger(const char* ip, int targetId);
-void freeNode(Node* node);
 
 Node* find_predecessor(Node* startNode, int id);
 Node* find_successor(Node* node, int id);
@@ -72,7 +69,6 @@ void freeNode(Node* node);
 void nodePrint(Node* node);
 void printNodeList(Node* head);
 void check_ring(Node* start);
-//void remote_check_ring(Node* start, const char* ip);
 
 void executeSSH(const char* ip, const char* command);
 
@@ -86,6 +82,7 @@ void remote_load_and_update_finger_table(Node* node, const char* remote_ip);
 Node* find_successor_with_finger_table(Node* node, int id);
 Node* find_predecessor_with_finger_table(Node* node, int id);
 */
+int init_socket(const char* ip, int port);
 Node* remote_get_node(t_server* s, int port, const char* ip);
 Node* remote_find_successor(t_server* s, int port, int targetId);
 Node* remote_find_predecessor(t_server* s, int port, int targetId);
@@ -94,5 +91,6 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId);
 void remote_join(const char* existingIp, int port, t_server* s);
 void remote_notify(t_server* s, int port, const char* existingIp);
 void remote_stabilize(t_server* s, int port);
+void remote_check_ring(t_server* s);
 
 #endif

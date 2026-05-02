@@ -6,13 +6,16 @@
 #include <math.h>
 #include <time.h>
 
+#include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <stdbool.h>
+#include <errno.h>
 
 #include "node.h"
 #include "logger.h"
+#include "tcpServer.h"
 //#include "DHASH.h"
 
 /*
@@ -257,6 +260,39 @@ Node* closest_preceding_finger(Node* node, int targetId) {
 //Node* remote_find_successor(const char* ip, int targetId);
 //Node* remote_get_successor(const char* ip);
 //Node* remote_closest_preceding_finger(const char* ip, int targetId);
+
+// Creates a shallow copy of a Node for thread-safe access
+Node* copyNode(Node* node) {
+    if (node == NULL) {
+        return NULL;
+    }
+    
+    Node* copy = malloc(sizeof(Node));
+    if (copy == NULL) {
+        return NULL;
+    }
+    
+    copy->id = node->id;
+    strncpy(copy->Ip, node->Ip, MAX_IP_LENGTH - 1);
+    copy->Ip[MAX_IP_LENGTH - 1] = '\0';
+    strncpy(copy->fileContentPath, node->fileContentPath, MAX_FILE_PATH_LENGTH - 1);
+    copy->fileContentPath[MAX_FILE_PATH_LENGTH - 1] = '\0';
+    
+    // Copy successor and predecessor pointers
+    copy->successor = node->successor != NULL ? createNode(node->successor->id, node->successor->Ip, node->successor->fileContentPath) : NULL;
+    copy->predecessor = node->predecessor != NULL ? createNode(node->predecessor->id, node->predecessor->Ip, node->predecessor->fileContentPath) : NULL;
+    
+    // Don't copy finger table - not needed for RPC operations
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        copy->fingerTable[i].start = 0;
+        copy->fingerTable[i].lowerIntervalLimit = 0;
+        copy->fingerTable[i].upperIntervalLimit = 0;
+        copy->fingerTable[i].successor = NULL;
+        copy->fingerTable[i].Ip[0] = '\0';
+    }
+    
+    return copy;
+}
 
 void freeNode(Node* node) {
     if (node != NULL) {
@@ -1006,22 +1042,32 @@ void remote_stabilize(Node *node) {
 int init_socket(const char* ip, int port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
-        perror("socket");
+        log_error("socket: %s", strerror(errno));
+        //perror("socket");
         return 0;
     }
+
+    // Set connection timeout to 3 seconds to prevent indefinite blocking
+    struct timeval tv;
+    tv.tv_sec = 3;   // 3 second timeout
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port);
 
     if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
-        perror("inet_pton");
+        log_error("inet_pton: %s", strerror(errno));
+        //perror("inet_pton");
         close(sock);
         return 0;
     }
 
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        perror("connect");
+        log_error("connect: %s", strerror(errno));
+        //perror("connect");
         close(sock);
         return 0;
     }
@@ -1033,9 +1079,14 @@ int init_socket(const char* ip, int port) {
 Node* remote_get_node(t_server* s, int port, const char* ip) {
     int sock = init_socket(ip, port);
 
-    // 🔴 Send request
+    if(sock == 0) {
+        log_warn("Invalid node accessed with remote_get_node()");
+        return NULL;
+    }
+
+    //  Send request
     char request[64];
-    snprintf(request, sizeof(request), "GET_NODE\n", targetId);
+    snprintf(request, sizeof(request), "GET_NODE\n");
 
     if (send(sock, request, strlen(request), 0) < 0) {
         perror("send");
@@ -1043,14 +1094,17 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
         return NULL;
     }
 
-    // 🔴 Receive response
-    char response[128];
+    //  Receive response with timeout protection
+    char response[256];
     int total = 0;
-
     int n = 0;
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
     //Extract response from server
-    while (1) {
+    while (total < sizeof(response) - 1) {
         n = recv(sock, response + total, sizeof(response) - total - 1, 0);
         if (n <= 0) break;
 
@@ -1066,8 +1120,7 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
         return NULL;
     }
 
-    response[n] = '\0';
-
+    response[total] = '\0';
 
     int node_id;
     char node_ip[64];
@@ -1079,10 +1132,10 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     Node* temp;
 
     //Parses information from response into temp variables
-    if (sscanf(response, "NODE %d %63s %d %63s %d %s", &node_id, node_ip, &succ_id, succ_ip, &pred_id, pred_ip) == 6) {
+    if (sscanf(response, "NODE %d %63s %d %63s %d %63s", &node_id, node_ip, &succ_id, succ_ip, &pred_id, pred_ip) == 6) {
         temp = createNode(node_id, node_ip, "shared/files");
         temp->successor = createNode(succ_id, succ_ip, "shared/files");
-        temp->predecessor = createNode(pred_id, pred_ip, "shared/files")
+        temp->predecessor = createNode(pred_id, pred_ip, "shared/files");
     } else {
         fprintf(stderr, "RPC error: %s\n", response);
         close(sock);
@@ -1096,37 +1149,55 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
 
 //Call from tcpServer
 Node* remote_find_predecessor(t_server* s, int port, int targetId) {
-    // The result would be parsed and returned as a Node object
-    Node* predecessor = s->localNode;
+    // Get a snapshot of the local node info while holding the lock to avoid race conditions
+    pthread_mutex_lock(&s->lock);
+    Node* predecessor = copyNode(s->localNode);
+    int localNodeId = s->localNode->id;
+    char localNodeIp[64];
+    strncpy(localNodeIp, s->localNode->Ip, sizeof(localNodeIp) - 1);
+    localNodeIp[sizeof(localNodeIp) - 1] = '\0';
+    pthread_mutex_unlock(&s->lock);
 
-    while (!half_left_open_interval(s->localNode->id, predecessor->id, predecessor->successor->id)) {
-        if (s->localNode->Ip == predecessor->Ip) {
-            predecessor = closest_preceding_finger(s->localNode, targetId);
+    while (!half_left_open_interval(localNodeId, predecessor->id, predecessor->successor->id)) {
+        if (strcmp(localNodeIp, predecessor->Ip) == 0) {
+            pthread_mutex_lock(&s->lock);
+            Node* cpf = closest_preceding_finger(s->localNode, targetId);
+            Node* cpf_copy = copyNode(cpf);
+            pthread_mutex_unlock(&s->lock);
+            
+            freeNode(predecessor);
+            predecessor = cpf_copy;
+
         } else {
             //Checks if init socket fails and returns NULL if it does
             int sock = init_socket(predecessor->Ip, port);
             if (!sock) {
+                freeNode(predecessor);
                 return NULL;
             }
             
-            // 🔴 Send request
+            //  Send request
             char request[64];
             snprintf(request, sizeof(request), "CLOSEST_PRECEDING_FINGER %d\n", targetId);
 
             if (send(sock, request, strlen(request), 0) < 0) {
                 perror("send");
                 close(sock);
+                freeNode(predecessor);
                 return NULL;
             }
 
-            // 🔴 Receive response
+            //  Receive response with timeout protection
             char response[128];
             int total = 0;
-
             int n = 0;
+            struct timeval tv;
+            tv.tv_sec = 2;
+            tv.tv_usec = 0;
+            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
             //Extract response from server
-            while (1) {
+            while (total < sizeof(response) - 1) {
                 n = recv(sock, response + total, sizeof(response) - total - 1, 0);
                 if (n <= 0) break;
 
@@ -1139,20 +1210,22 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
             if (n <= 0) {
                 perror("recv");
                 close(sock);
+                freeNode(predecessor);
                 return NULL;
             }
 
-            response[n] = '\0';
-
+            response[total] = '\0';
 
             int node_id;
             char node_ip[64];
 
             if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
+                freeNode(predecessor);
                 predecessor = createNode(node_id, node_ip, "shared/files");
             } else {
                 fprintf(stderr, "RPC error: %s\n", response);
                 close(sock);
+                freeNode(predecessor);
                 return NULL;
             }
 
@@ -1173,6 +1246,8 @@ Node* remote_find_successor(t_server* s, int port, int targetId) {
     Node* temp = remote_find_predecessor(s, port, targetId);
 
     Node* succ = remote_get_node(s, port, temp->successor->Ip);
+
+    log_info("Succesfull find_successor process completed at node %d %s", s->localNode->id, s->localNode->Ip);
 
     return succ;
 }
@@ -1218,11 +1293,16 @@ void remote_join(const char* existingIp, int port, t_server* s) {
         return;
     }
 
+    pthread_mutex_lock(&s->lock);
     s->localNode->predecessor = NULL;
+    pthread_mutex_unlock(&s->lock);
+    
+    Node* tempSucc = remote_find_successor(s, port, s->localNode->id);
 
-    Node* tempSucc = remote_find_successor(s, sock, port, s->localNode->id);
-
+    pthread_mutex_lock(&s->lock);
     s->localNode->successor = tempSucc; 
+    pthread_mutex_unlock(&s->lock);
+
 
     close(sock);
 
@@ -1231,64 +1311,128 @@ void remote_join(const char* existingIp, int port, t_server* s) {
 
 
 void remote_notify(t_server* s, int port, const char* existingIp) {
+    // Get local node info while holding lock
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode == NULL) {
+        pthread_mutex_unlock(&s->lock);
+        log_error("In remote_notify() Local node is NULL");
+        return;
+    }
+    int local_id = s->localNode->id;
+    char local_ip[64];
+    strncpy(local_ip, s->localNode->Ip, sizeof(local_ip) - 1);
+    local_ip[sizeof(local_ip) - 1] = '\0';
+    pthread_mutex_unlock(&s->lock);
+
     int sock = init_socket(existingIp, port);
 
     if (!sock) {
+        log_error("In remote_notify() Unable to establish socket to %s in node %d %s", existingIp, local_id, local_ip);
         return;
     }
     
-    if (existingIp == s->localNode->Ip) {
+    // Check if existing IP is same as local node IP
+    if (strcmp(existingIp, local_ip) == 0) {
+        pthread_mutex_lock(&s->lock);
         if (s->localNode->predecessor == NULL || in_open_interval(s->localNode->id, s->localNode->predecessor->id, s->localNode->id)) {
-            s->localNode->predecessor = s->localNode->id;
+            s->localNode->predecessor = s->localNode;
         }
-
+        pthread_mutex_unlock(&s->lock);
+        close(sock);
         return;
     }
 
     Node* otherNode = remote_get_node(s, port, existingIp);
 
-    if (s->localNode->predecessor == NULL || in_open_interval(otherNode->id, s->localNode->predecessor->id, s->localNode->id)) {
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode != NULL && (s->localNode->predecessor == NULL || (otherNode != NULL && in_open_interval(otherNode->id, s->localNode->predecessor->id, s->localNode->id)))) {
         s->localNode->predecessor = otherNode;
     }
+    pthread_mutex_unlock(&s->lock);
 
     close(sock);
+
+    log_info("Succesfull notify process completed at node %d %s", local_id, local_ip);
 
     return;
 }
 
 void remote_stabilize(t_server* s, int port) {
-    Node* temp = remote_get_node(s, port, s->localNode->successor->Ip);
-
-    Node* x = temp->predecessor;
-
-    if (in_open_interval(x->id, s->localNode->id, temp->id)) {
-        s->localNode->successor = x;
+    // Get successor IP and node ID while holding lock
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode == NULL || s->localNode->successor == NULL) {
+        pthread_mutex_unlock(&s->lock);
+        log_warn("[WARN] Local node or successor is NULL in remote_stabilize\n");
+        return;
     }
+    char successor_ip[64];
+    strncpy(successor_ip, s->localNode->successor->Ip, sizeof(successor_ip) - 1);
+    successor_ip[sizeof(successor_ip) - 1] = '\0';
+    int local_id = s->localNode->id;
+    char local_ip[64];
+    strncpy(local_ip, s->localNode->Ip, sizeof(local_ip) - 1);
+    local_ip[sizeof(local_ip) - 1] = '\0';
+    int local_port = s->port;
+    pthread_mutex_unlock(&s->lock);
 
-    int sock = init_socket(s->localNode->successor->Ip, s->port);
+    Node* temp = remote_get_node(s, local_port, successor_ip);
 
-    if (!sock) {
+    if (temp == NULL) { 
+        log_warn("[WARN] Could not get successor node info\n");
         return;
     }
 
-    // 🔴 Send request
+    Node* x = temp->predecessor;
+
+    if (in_open_interval(x->id, local_id, temp->id)) {
+        pthread_mutex_lock(&s->lock);
+        if (s->localNode != NULL) {
+            s->localNode->successor = x;
+        }
+        pthread_mutex_unlock(&s->lock);
+    }
+
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode == NULL || s->localNode->successor == NULL) {
+        pthread_mutex_unlock(&s->lock);
+        freeNode(temp);
+        return;
+    }
+    strncpy(successor_ip, s->localNode->successor->Ip, sizeof(successor_ip) - 1);
+    successor_ip[sizeof(successor_ip) - 1] = '\0';
+    pthread_mutex_unlock(&s->lock);
+
+    int sock = init_socket(successor_ip, local_port);
+
+    if (!sock) {
+        freeNode(temp);
+        return;
+    }
+
+    // Send request
     char request[64];
-    snprintf(request, sizeof(request), "STABILIZE %s\n", s->localNode->Ip);
+    snprintf(request, sizeof(request), "STABILIZE %.15s\n", local_ip);
 
     if (send(sock, request, strlen(request), 0) < 0) {
         perror("send");
         close(sock);
-        return NULL;
+        freeNode(temp);
+        return;
     }
 
-    // 🔴 Receive response
+    log_info("Stabilize request sent, awaiting response. Sent from node %d %s", local_id, local_ip);
+
+    // Receive response with timeout
     char response[128];
     int total = 0;
-
     int n = 0;
+    struct timeval tv;
+    tv.tv_sec = 2;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
     //Extract response from server
-    while (1) {
+    while (total < sizeof(response) - 1) {
         n = recv(sock, response + total, sizeof(response) - total - 1, 0);
         if (n <= 0) break;
 
@@ -1301,17 +1445,64 @@ void remote_stabilize(t_server* s, int port) {
     if (n <= 0) {
         perror("recv");
         close(sock);
-        return NULL;
+        freeNode(temp);
+        return;
     }
 
-    response[n] = '\0';
+    response[total] = '\0';
 
     //Parses information from response into temp variables
-    if (response != "OK\n") {
+    if (strncmp(response, "OK", 2) != 0) {
         log_error(response);
     }
 
     close(sock);
+
+    log_info("Succesfull stabilize process completed at node %d %s", local_id, local_ip);
+
+    freeNode(temp);
+
+    return;
+}
+
+void remote_check_ring(t_server* s) {
+    // Get local node info while holding lock
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode == NULL || s->localNode->successor == NULL) {
+        pthread_mutex_unlock(&s->lock);
+        log_error("In remote_check_ring() Local node or successor is NULL");
+        return;
+    }
+    char successor_ip[64];
+    strncpy(successor_ip, s->localNode->successor->Ip, sizeof(successor_ip) - 1);
+    successor_ip[sizeof(successor_ip) - 1] = '\0';
+    int local_id = s->localNode->id;
+    char local_ip[64];
+    strncpy(local_ip, s->localNode->Ip, sizeof(local_ip) - 1);
+    local_ip[sizeof(local_ip) - 1] = '\0';
+    int port = s->port;
+    pthread_mutex_unlock(&s->lock);
+
+    int sock = init_socket(successor_ip, port);
+
+    if (!sock) {
+        log_error("In remote_check_ring() Unable to establish socket to %s in node %d %s", successor_ip, local_id, local_ip);
+        return;
+    }
+    
+    //  Send request
+    char request[64];
+    snprintf(request, sizeof(request), "CHECK_RING %d\n", local_id);
+
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return;
+    }
+
+    close(sock);
+
+    log_info("Check ring process started in node %d %s", local_id, local_ip);
 
     return;
 }

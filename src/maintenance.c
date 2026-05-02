@@ -4,6 +4,9 @@
 
 #include "logger.h"
 #include "maintenance.h"
+#include "tcpServer.h"
+
+#include "node.h"
 
 
 //Function that loops in the background
@@ -13,28 +16,34 @@ void* maintanance_worker(void* arg) {
     time_t last_stabilized_time = time(NULL);
     time_t last_fixed_time = time(NULL);
 
-    log_info("[MAINTENANCE] Background thread started for Node %d\n", mt->node->id);
+    log_info("[MAINTENANCE] Background thread started for Node %d\n", mt->localServer->localNode->id);
 
     while (mt->running) {
         time_t now = time(NULL);
 
         //Checks time intervals to execute stabilization
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000) {
+            log_info("[MAINTENANCE] Starting stabilization for Node %d\n", mt->localServer->localNode->id);
+            
             //Assuming all machines use same port
-            pthread_mutex_lock(&s->lock);
+            pthread_mutex_lock(&mt->localServer->lock);
 
             remote_stabilize(mt->localServer, mt->localServer->port);
 
-            pthread_mutex_unlock(&s->lock);
+            pthread_mutex_unlock(&mt->localServer->lock);
 
             last_stabilized_time = now;
 
-            log_info("[MAINTENANCE] Stabilization completed for Node %d\n", mt->node->id);
+            log_info("[MAINTENANCE] Stabilization completed for Node %d\n", mt->localServer->localNode->id);
         }
 
         //Checks time intervals to execute fix_fingers()
         if ((now-last_fixed_time) >= mt->fix_fingers_interval_ms / 1000) {
+            log_info("[MAINTENANCE] Starting fix_fingers for Node %d\n", mt->localServer->localNode->id);
+            
+            pthread_mutex_lock(&mt->localServer->lock);
             fix_fingers(mt->localServer->localNode);
+            pthread_mutex_unlock(&mt->localServer->lock);
 
             last_fixed_time = now;
 
@@ -58,7 +67,7 @@ MaintenanceThread* start_maintenance_thread(t_server* localServer, int stabilize
     mt->running = 1;
 
     pthread_t thread_id;
-    if(pthread_create(&thread_id, NULL, maintanance_worker,(void*)mt) != 0) {
+    if(pthread_create(&mt->thread_id, NULL, maintanance_worker,(void*)mt) != 0) {
         log_warn("Failed to create maintenance thread\n");
         free(mt);
         return NULL;

@@ -1,6 +1,7 @@
 #include <math.h>
 #include <time.h>
 #include <pthread.h>
+#include <arpa/inet.h>
 
 #include "src/DHASH.h"
 #include "src/node.h"
@@ -40,23 +41,7 @@ int main() {
     
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
     loadFingerTableFromFile(localNode, "nodeInfo/FingerTable");
-
-    int defaultPort = 8080;
-    if (defaultPort <= 0 || defaultPort > 65535) fatalError(NULL);
-    t_server *serv = initServer(port, localNode);
-
-    pthread_t server_tid;
-
-    pthread_create(&server_tid, NULL, server_loop, serv);
-
-    if (serv) {
-        createSock(serv);
-        configAddr(serv);
-        bindAndListen(serv);
-        handleCon(serv);
-        deleteAll(serv);
-    }
-
+    
     char input[100];
 
     if (localNode == NULL) {
@@ -79,7 +64,23 @@ int main() {
         loadFingerTableFromFile(localNode, "nodeInfo/FingerTable");
     }
 
-    
+    int defaultPort = 8080;
+    if (defaultPort <= 0 || defaultPort > 65535) fatalError(NULL);
+    t_server *serv = initServer(defaultPort, localNode);
+
+    pthread_t server_tid;
+
+    pthread_create(&server_tid, NULL, server_loop, serv);
+
+    if (serv) {
+        createSock(serv);
+        configAddr(serv);
+        bindAndListen(serv);
+        // handleCon() not needed here - server_loop() already monitors sockets
+        // handleCon(serv);
+        // deleteAll(serv);
+    }
+
     // Background service that maintains chord ring integrity
     MaintenanceThread* mt = start_maintenance_thread(serv, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
 
@@ -90,7 +91,7 @@ int main() {
 
     while (true) {
         // 1. Print a prompt
-        printf("Enter command: join node to network [n] (only if new to the network), test chord ring structure [t], get current node information [g], toggle system logs [l], toggle error/warning logs [w], or exit [e]): ");
+        printf("Enter command: join node to network [n] (only if new to the network), get succesor [f], get predecessor [p], test chord ring structure [t], get current node information [g], toggle system logs [l], toggle error/warning logs [w], or exit [e]): ");
         
         // 2. Read input from user
         if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -119,11 +120,27 @@ int main() {
 
             remote_join(existingIp, 8080, serv);  // Empty string for username (not used with TCP)
         }
+        else if (strcmp(input, "f") == 0) {
+            Node* succ = remote_find_successor(serv, serv->port, serv->localNode->id);
+
+            if (succ != NULL) {
+                printf("Successor for node found, id: %d IP: %s", succ->id, succ->Ip);
+            } else {
+                printf("Problem occured with locating successor.");
+            }
+        }
+        else if (strcmp(input, "p") == 0) {
+            Node* pred = remote_find_predecessor(serv, serv->port, serv->localNode->id);
+
+            if (pred != NULL) {
+                printf("Successor for node found, id: %d IP: %s", pred->id, pred->Ip);
+            } else {
+                printf("Problem occured with locating predecessor.");
+            }
+        }
         else if (strcmp(input, "t") == 0) {
             // Test chord ring structure
-            //remote_check_ring(localNode, localNode->successor->Ip);
-            //Node* temp = remote_find_successor()
-
+            remote_check_ring(serv);
         } else if (strcmp(input, "g") == 0) {
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
             // Get current node information
