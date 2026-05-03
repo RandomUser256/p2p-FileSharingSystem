@@ -68,18 +68,14 @@ int main() {
     if (defaultPort <= 0 || defaultPort > 65535) fatalError(NULL);
     t_server *serv = initServer(defaultPort, localNode);
 
-    pthread_t server_tid;
-
-    pthread_create(&server_tid, NULL, server_loop, serv);
-
     if (serv) {
         createSock(serv);
         configAddr(serv);
         bindAndListen(serv);
-        // handleCon() not needed here - server_loop() already monitors sockets
-        // handleCon(serv);
-        // deleteAll(serv);
     }
+
+    pthread_t server_tid;
+    pthread_create(&server_tid, NULL, server_loop, serv);
 
     // Background service that maintains chord ring integrity
     MaintenanceThread* mt = start_maintenance_thread(serv, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
@@ -133,7 +129,7 @@ int main() {
             Node* pred = remote_find_predecessor(serv, serv->port, serv->localNode->id);
 
             if (pred != NULL) {
-                printf("Successor for node found, id: %d IP: %s", pred->id, pred->Ip);
+                printf("Predecessor for node found, id: %d IP: %s", pred->id, pred->Ip);
             } else {
                 printf("Problem occured with locating predecessor.");
             }

@@ -1,11 +1,14 @@
 #include <stdio.h>
 #include <stdbool.h>
 
+
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include <time.h>
 
+#include <fcntl.h>
+#include <sys/select.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/socket.h>
@@ -21,14 +24,11 @@
 /*
 TODO:
     - Implement correct hashing of file identifiers
-    - Add SSH querying to retrieve file content from the responsible node and store
-    - remote_join() error 
-        - Almost implemented, but the remoteSuccesor node is not being remotely updated with the new predecessor
 */
 
 /*
 ERRORS
-    - When looking for the successor of an ID that is active in the ring, it returns that same ID instead of its successor 
+
 */
 
 //Helper functions for evaluating the position of a value within a number interval
@@ -256,11 +256,6 @@ Node* closest_preceding_finger(Node* node, int targetId) {
     return node; // If no successor is found in the finger table, return the current node
 }
 
-
-//Node* remote_find_successor(const char* ip, int targetId);
-//Node* remote_get_successor(const char* ip);
-//Node* remote_closest_preceding_finger(const char* ip, int targetId);
-
 // Creates a shallow copy of a Node for thread-safe access
 Node* copyNode(Node* node) {
     if (node == NULL) {
@@ -300,89 +295,6 @@ void freeNode(Node* node) {
     }
 }
 
-/*
-Node* find_predecessor(Node* startNode, int id) {
-    if (!startNode || !startNode->successor) {
-        printf("Local node has no successor loaded\n");
-        return NULL;
-    }
-
-    // Early exit using local struct data (no SSH to self):
-    // if id ∈ (startNode, startNode->successor] then startNode is the predecessor.
-    // Skip when id == startNode->id — that requires a full wraparound walk.
-    if (id != startNode->id) {
-        if (half_left_open_interval(id, startNode->id, startNode->successor->id)) {
-            // Always return a fresh heap allocation so callers can freeNode safely.
-            return createNode(startNode->id, startNode->Ip, "shared/files");
-        }
-    }
-
-    // Seed the walk. If the local finger table is empty (all entries point to
-    // self), closest_preceding_finger will return startNode itself — in that
-    // case advance directly to startNode's successor so the walk moves forward.
-    Node* cpf = remote_closest_preceding_finger(startNode->Ip, id);
-    if (cpf == NULL) return NULL;
-
-    Node* n;
-    if (cpf->id == startNode->id) {
-        // Finger table gave us nothing useful — step to successor instead.
-        freeNode(cpf);
-        n = createNode(startNode->successor->id, startNode->successor->Ip, "shared/files");
-    } else {
-        n = cpf;
-    }
-
-    // Walk the ring hop by hop, advancing through successors when no better
-    // finger is available. Every pointer except startNode is heap-allocated
-    // by createNode/remote_* so it is safe to freeNode on every path.
-    int maxHops = MAX_NUMBER_NODES;
-    while (maxHops-- > 0) {
-        Node* nSucc = remote_get_successor(n->Ip);
-        if (nSucc == NULL) {
-            printf("Error getting successor during traversal\n");
-            freeNode(n);
-            return NULL;
-        }
-
-        // id ∈ (n, nSucc] → n is the predecessor
-        if (half_left_open_interval(id, n->id, nSucc->id)) {
-            freeNode(nSucc);
-            return n;
-        }
-
-        Node* next = remote_closest_preceding_finger(n->Ip, id);
-        freeNode(nSucc);
-
-        if (next == NULL) {
-            printf("Error getting closest preceding finger\n");
-            freeNode(n);
-            return NULL;
-        }
-
-        if (next->id == n->id) {
-            // Finger table on this node is also empty — advance to its successor
-            // rather than stopping, so the walk keeps making progress.
-            freeNode(next);
-            Node* succ = remote_get_successor(n->Ip);
-            if (succ == NULL || succ->id == n->id) {
-                // Truly stuck — return best guess
-                freeNode(succ);
-                return n;
-            }
-            freeNode(n);
-            n = succ;
-            continue;
-        }
-
-        freeNode(n);
-        n = next;
-    }
-
-    printf("find_predecessor: max hops reached\n");
-    freeNode(n);
-    return NULL;
-}
-    */
 Node* find_predecessor(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -400,16 +312,6 @@ Node* find_predecessor(Node* node, int targetId) {
 
     return n;
 }
-
-/*
-//Chord algorithm successor check
-Node* find_successor(Node* node, int id) {
-    Node* pred = find_predecessor(node, id);
-
-    if (pred == NULL) return NULL;
-
-    return remote_get_successor(pred->Ip);
-}*/
 
 Node* find_successor(Node* node, int targetId) {
     if (!node) {
@@ -792,248 +694,6 @@ void printFingerTable(Node* node) {
     printf("╚════════════════════════════════════════════════════════════╝\n\n");
 }
 
-/* REMOTE FINGER TABLE OPERATIONS
-   - Query finger tables from remote nodes via SSH
-   - Rebuild complete finger table structures from remote machine
-*/
-/*
-void remote_print_finger_table(const char* ip) {
-    char command[256];
-    snprintf(command, sizeof(command),
-        "ssh %s \"cd /home/mmagallanes && ./scripts/node_comms print_finger_table\" 2>/dev/null",
-        ip);
-
-    system(command);
-}
-
-//Fetches finger table from another machine and loads information into local nod
-void remote_load_and_update_finger_table(Node* node, const char* remote_ip) {
-    if (!node) {
-        printf("Error: node is NULL\n");
-        return;
-    }
-
-    printf("[INFO] Loading finger table from remote node at %s\n", remote_ip);
-
-    char command[512];
-    snprintf(command, sizeof(command),
-        "ssh %s \"cd /home/mmagallanes && cat nodeInfo/FingerTable 2>/dev/null\" 2>/dev/null",
-        remote_ip);
-
-    FILE* fp = popen(command, "r");
-    if (!fp) {
-        printf("Warning: could not connect to remote node at %s\n", remote_ip);
-        return;
-    }
-
-    char line[512];
-    int entry_idx = 0;
-
-    //Constructs fingertable from the extracted tet information
-    while (fgets(line, sizeof(line), fp) && entry_idx < NODE_ID_LENGTH) {
-        // Skip comments and empty lines
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
-            continue;
-        }
-
-        int idx, start, lower, upper, succ_id;
-        char succ_ip[MAX_IP_LENGTH] = {0};
-
-        int parsed = sscanf(line,
-                           "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%15s",
-                           &idx, &start, &lower, &upper, &succ_id, succ_ip);
-
-        if (parsed != 6) {
-            continue;
-        }
-
-        if (idx < 0 || idx >= NODE_ID_LENGTH) {
-            continue;
-        }
-
-        node->fingerTable[idx].start = start;
-        node->fingerTable[idx].lowerIntervalLimit = lower;
-        node->fingerTable[idx].upperIntervalLimit = upper;
-
-        // Update successor reference
-        //Checks if successor ID and IP are valid before updating the finger table entry
-        if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
-            // Reuse existing successor if IDs match, otherwise create new node
-            if (node->fingerTable[idx].successor == NULL ||
-                node->fingerTable[idx].successor->id != succ_id) {
-                if (node->fingerTable[idx].successor != NULL &&
-                    node->fingerTable[idx].successor != node) {
-                    freeNode(node->fingerTable[idx].successor);
-                }
-                node->fingerTable[idx].successor = createNode(succ_id, succ_ip, "");
-            }
-            strncpy(node->fingerTable[idx].Ip, succ_ip, MAX_IP_LENGTH - 1);
-            node->fingerTable[idx].Ip[MAX_IP_LENGTH - 1] = '\0';
-        } else {
-            node->fingerTable[idx].successor = node;
-            node->fingerTable[idx].Ip[0] = '\0';
-        }
-
-        entry_idx++;
-    }
-
-    pclose(fp);
-    printf("[INFO] Remote finger table loaded successfully\n");
-}
-*/
-/* ======================================================================
-   OPTIMIZED LOOKUP USING FINGER TABLES
-   - Uses finger tables for O(log n) instead of O(n) lookups
-   - Traverses nodes with finger table guidance
-   ====================================================================== */
-/*
-Node* find_successor_with_finger_table(Node* node, int id) {
-    if (!node) {
-        return NULL;
-    }
-
-    // Step 1: Quick local check - if id is in interval (node_id, successor_id]
-    if (node->successor != NULL && 
-        half_left_open_interval(id, node->id, node->successor->id)) {
-        return createNode(node->successor->id, node->successor->Ip, "shared/Files");
-    }
-
-    // Step 2: Find closest preceding finger using the finger table
-    Node* cpf = closest_preceding_finger(node, id);
-    if (cpf == NULL) {
-        return node; // return self if non valid finger found
-    }
-
-    // Step 3: If local node is closest preceding node, proceed with regular lookup
-    if (cpf->id == node->id) {
-        return find_successor(node, id);
-    }
-
-    // Step 4: Remote lookup on the closest preceding finger
-    return remote_find_successor(cpf->Ip, id);
-}
-
-Node* find_predecessor_with_finger_table(Node* node, int id) {
-    if (!node || !node->successor) {
-        log_error("[ERROR] find_predecessor_with_finger_table: Node or successor is NULL\n");
-        return NULL;
-    }
-
-    // Quick local check
-    if (id != node->id && 
-        half_left_open_interval(id, node->id, node->successor->id)) {
-        //Return self in case of being the predecessor fo Target ID 
-        return createNode(node->id, node->Ip, "");
-    }
-
-    // Use finger table to navigate efficiently
-    Node* current = node;
-    Node* cpf = closest_preceding_finger(current, id);
-    
-    if (cpf == NULL) {
-        return NULL;
-    }
-
-    if (cpf->id == node->id) {
-        // Finger table points to self, use remote traversal
-        return find_predecessor(node, id);
-    }
-
-    // Perform remote lookup chain using finger table guidance
-    int max_hops = NODE_ID_LENGTH + 2; // Log(n) hops expected
-    
-    while (max_hops-- > 0) {
-        Node* next_cpf = remote_closest_preceding_finger(cpf->Ip, id);
-        
-        if (next_cpf == NULL) {
-            return cpf; // Return best guess so far
-        }
-
-        Node* succ = remote_get_successor(cpf->Ip);
-        if (succ == NULL) {
-            freeNode(next_cpf);
-            return cpf;
-        }
-
-        // Check if predecessor found
-        if (half_left_open_interval(id, cpf->id, succ->id)) {
-            freeNode(next_cpf);
-            freeNode(succ);
-            return cpf;
-        }
-
-        freeNode(succ);
-        
-        // Move to next node indicated by finger table
-        if (next_cpf->id != cpf->id && cpf != node) {
-            freeNode(cpf);
-        }
-        
-        cpf = next_cpf;
-    }
-
-    log_warn("[WARN] Max hops reached in find_predecessor_with_finger_table\n");
-    return cpf;
-}
-*/
-/* REMOTE NOTIFY - Notifies a remote node about a potential predecessor
-   Used during stabilization to maintain ring consistency
-   Sends predecessor info to remote node which updates and saves its predecessor 
-
-void remote_notify(const char* remote_ip, Node* potentialPredecessor) {
-    if (!remote_ip || !potentialPredecessor) {
-        log_error("[ERROR] remote_notify: Invalid parameters\n");
-        return;
-    }
-
-    char command[512];
-    snprintf(command, sizeof(command),
-        "ssh %s 'cd /home/mmagallanes && ./scripts/node_comms notify %d %s'",
-        remote_ip,
-        potentialPredecessor->id,
-        potentialPredecessor->Ip);
-
-    log_info("[INFO] Notifying node at %s about predecessor %d\n", 
-             remote_ip, potentialPredecessor->id);
-
-    int result = system(command);
-    if (result != 0) {
-        log_warn("[WARN] Remote notify to %s failed (may be unreachable)\n", remote_ip);
-    }
-}
-    */
-
-/*
-//Uses remote communication to obtain the successor of local node with remote nodes and perform stabilization based on that information
-void remote_stabilize(Node *node) {
-    if (!node || !node->successor) {
-        log_error("[ERROR] remote_stabilize: Node or successor is NULL\n");
-        return;
-    }
-
-    log_info("[INFO] Remote stabilization for Node %d\n", node->id);
-
-    // Step 1: Get successor's predecessor
-    Node* x = remote_get_successor(node->successor->Ip);
-    if (x == NULL) {
-        log_warn("[WARN] Could not get successor's predecessor\n");
-        return;
-    }
-
-    // Step 2: Check if successor's predecessor is a better successor
-    if (x != NULL && in_open_interval(x->id, node->id, node->successor->id)) {
-        node->successor = x;
-        saveNodeToFile(node, "nodeInfo/Node");
-        log_info("[INFO] Updated successor to Node %d\n", x->id);
-    }
-
-    // Step 3: Notify the successor about this node as a potential predecessor
-    remote_notify(node->successor->Ip, node);
-    
-    freeNode(x);
-}
-*/
-
 /* ======================================================================
    Chord functions for remote communication 
    -
@@ -1043,16 +703,22 @@ int init_socket(const char* ip, int port) {
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         log_error("socket: %s", strerror(errno));
-        //perror("socket");
-        return 0;
+        return -1;
     }
 
-    // Set connection timeout to 3 seconds to prevent indefinite blocking
-    struct timeval tv;
-    tv.tv_sec = 3;   // 3 second timeout
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
-    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, (const char*)&tv, sizeof tv);
+    // Set non-blocking
+    int flags = fcntl(sock, F_GETFL, 0);
+    if (flags < 0) {
+        log_error("fcntl F_GETFL: %s", strerror(errno));
+        close(sock);
+        return -1;
+    }
+
+    if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
+        log_error("fcntl F_SETFL: %s", strerror(errno));
+        close(sock);
+        return -1;
+    }
 
     struct sockaddr_in addr;
     addr.sin_family = AF_INET;
@@ -1060,17 +726,69 @@ int init_socket(const char* ip, int port) {
 
     if (inet_pton(AF_INET, ip, &addr.sin_addr) <= 0) {
         log_error("inet_pton: %s", strerror(errno));
-        //perror("inet_pton");
         close(sock);
-        return 0;
+        return -1;
     }
 
-    if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
-        log_error("connect: %s", strerror(errno));
-        //perror("connect");
-        close(sock);
-        return 0;
+    int res = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
+
+    if (res < 0) {
+        if (errno != EINPROGRESS) {
+            log_error("connect: %s", strerror(errno));
+            close(sock);
+            return -1;
+        }
+
+        // Wait up to 3 seconds
+        fd_set wfds;
+        FD_ZERO(&wfds);
+        FD_SET(sock, &wfds);
+
+        struct timeval tv;
+        tv.tv_sec = 3;
+        tv.tv_usec = 0;
+
+        res = select(sock + 1, NULL, &wfds, NULL, &tv);
+
+        if (res == 0) {
+            log_error("connect timeout (3s)");
+            close(sock);
+            return -1;
+        }
+        if (res < 0) {
+            log_error("select: %s", strerror(errno));
+            close(sock);
+            return -1;
+        }
+
+        // Check if connection actually succeeded
+        int so_error;
+        socklen_t len = sizeof(so_error);
+
+        if (getsockopt(sock, SOL_SOCKET, SO_ERROR, &so_error, &len) < 0) {
+            log_error("getsockopt: %s", strerror(errno));
+            close(sock);
+            return -1;
+        }
+
+        if (so_error != 0) {
+            log_error("connect failed: %s", strerror(so_error));
+            close(sock);
+            return -1;
+        }
     }
+
+    // Restore blocking mode
+    if (fcntl(sock, F_SETFL, flags) < 0) {
+        log_warn("failed to restore blocking mode");
+    }
+
+    // (optional) keep your send/recv timeouts
+    struct timeval tv;
+    tv.tv_sec = 3;
+    tv.tv_usec = 0;
+    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+    setsockopt(sock, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
 
     return sock;
 }
@@ -1079,7 +797,7 @@ int init_socket(const char* ip, int port) {
 Node* remote_get_node(t_server* s, int port, const char* ip) {
     int sock = init_socket(ip, port);
 
-    if(sock == 0) {
+    if (sock < 0) {
         log_warn("Invalid node accessed with remote_get_node()");
         return NULL;
     }
@@ -1098,10 +816,6 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     char response[256];
     int total = 0;
     int n = 0;
-    struct timeval tv;
-    tv.tv_sec = 2;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
     //Extract response from server
     while (total < sizeof(response) - 1) {
@@ -1158,7 +872,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
     localNodeIp[sizeof(localNodeIp) - 1] = '\0';
     pthread_mutex_unlock(&s->lock);
 
-    while (!half_left_open_interval(localNodeId, predecessor->id, predecessor->successor->id)) {
+    while (!half_left_open_interval(targetId, predecessor->id, predecessor->successor->id)) {
         if (strcmp(localNodeIp, predecessor->Ip) == 0) {
             pthread_mutex_lock(&s->lock);
             Node* cpf = closest_preceding_finger(s->localNode, targetId);
@@ -1171,7 +885,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
         } else {
             //Checks if init socket fails and returns NULL if it does
             int sock = init_socket(predecessor->Ip, port);
-            if (!sock) {
+            if (sock < 0) {
                 freeNode(predecessor);
                 return NULL;
             }
@@ -1191,10 +905,6 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
             char response[128];
             int total = 0;
             int n = 0;
-            struct timeval tv;
-            tv.tv_sec = 2;
-            tv.tv_usec = 0;
-            setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
             //Extract response from server
             while (total < sizeof(response) - 1) {
@@ -1245,10 +955,22 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
 Node* remote_find_successor(t_server* s, int port, int targetId) {
     Node* temp = remote_find_predecessor(s, port, targetId);
 
+    if (temp == NULL) {
+        log_error("remote_find_successor: remote_find_predecessor returned NULL for target %d\n", targetId);
+        return NULL;
+    }
+
+    if (temp->successor == NULL) {
+        log_error("remote_find_successor: predecessor has NULL successor\n");
+        freeNode(temp);
+        return NULL;
+    }
+
     Node* succ = remote_get_node(s, port, temp->successor->Ip);
 
     log_info("Succesfull find_successor process completed at node %d %s", s->localNode->id, s->localNode->Ip);
 
+    freeNode(temp);
     return succ;
 }
 
@@ -1289,7 +1011,7 @@ void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node*
 
 void remote_join(const char* existingIp, int port, t_server* s) {
     int sock = init_socket(existingIp, port);
-    if (!sock) {
+    if (sock < 0) {
         return;
     }
 
@@ -1326,7 +1048,7 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
 
     int sock = init_socket(existingIp, port);
 
-    if (!sock) {
+    if (sock < 0) {
         log_error("In remote_notify() Unable to establish socket to %s in node %d %s", existingIp, local_id, local_ip);
         return;
     }
@@ -1404,7 +1126,7 @@ void remote_stabilize(t_server* s, int port) {
 
     int sock = init_socket(successor_ip, local_port);
 
-    if (!sock) {
+    if (sock < 0) {
         freeNode(temp);
         return;
     }
@@ -1426,10 +1148,6 @@ void remote_stabilize(t_server* s, int port) {
     char response[128];
     int total = 0;
     int n = 0;
-    struct timeval tv;
-    tv.tv_sec = 2;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
 
     //Extract response from server
     while (total < sizeof(response) - 1) {
@@ -1485,7 +1203,7 @@ void remote_check_ring(t_server* s) {
 
     int sock = init_socket(successor_ip, port);
 
-    if (!sock) {
+    if (sock < 0) {
         log_error("In remote_check_ring() Unable to establish socket to %s in node %d %s", successor_ip, local_id, local_ip);
         return;
     }

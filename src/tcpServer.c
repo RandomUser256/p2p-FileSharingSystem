@@ -308,12 +308,13 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     }
 
     else if (strcmp(cmd, "STABILIZE") == 0) {
-        char* existingIp;
+        char existingIp[64];
         if (sscanf(msg, "STABILIZE %63s", existingIp) == 1) {
             remote_notify(s, defaultPort, existingIp);
             send(cli->fd, "OK\n", 3, 0);
+        } else {
+            send(cli->fd, "Invalid arguments given for stabilize\n", 3, 0);
         }
-        send(cli->fd, "Invalid arguments given for stabilize\n", 3, 0);
     }
 
     // --------------------
@@ -387,13 +388,15 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         char node_ip[64];
         strncpy(node_ip, s->localNode->Ip, sizeof(node_ip) - 1);
         node_ip[sizeof(node_ip) - 1] = '\0';
-        int succ_id = s->localNode->successor->id;
+        Node* succ_ref = s->localNode->successor ? s->localNode->successor : s->localNode;
+        int succ_id = succ_ref->id;
         char succ_ip[64];
-        strncpy(succ_ip, s->localNode->successor->Ip, sizeof(succ_ip) - 1);
+        strncpy(succ_ip, succ_ref->Ip, sizeof(succ_ip) - 1);
         succ_ip[sizeof(succ_ip) - 1] = '\0';
-        int pred_id = s->localNode->predecessor->id;
+        Node* pred_ref = s->localNode->predecessor ? s->localNode->predecessor : s->localNode;
+        int pred_id = pred_ref->id;
         char pred_ip[64];
-        strncpy(pred_ip, s->localNode->predecessor->Ip, sizeof(pred_ip) - 1);
+        strncpy(pred_ip, pred_ref->Ip, sizeof(pred_ip) - 1);
         pred_ip[sizeof(pred_ip) - 1] = '\0';
         pthread_mutex_unlock(&s->lock);
         
@@ -407,47 +410,64 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     // CHECK_RING
     // --------------------
     else if (strcmp(cmd, "CHECK_RING") == 0) {
-        int startingNode = 0; //Node that started the check ring command, used to stop when returning to it
+        int startingNode = 0;
 
         if (sscanf(msg, "CHECK_RING %d", &startingNode) == 1) {
-            //Ends check ring loop if loops back to original node
+            // Stop propagation when the walk returns to the originating node
             if (s->localNode->id == startingNode) {
                 log_info("Completed ring check at node %d with IP: %s", s->localNode->id, s->localNode->Ip);
+                return;
+            }
+
+            if (s->localNode->predecessor == NULL) {
+                log_warn("CHECK_RING: predecessor is NULL at node %d, ring not fully formed", s->localNode->id);
+                return;
             }
 
             Node* tempSucc = remote_get_node(s, s->port, s->localNode->successor->Ip);
             Node* tempPred = remote_get_node(s, s->port, s->localNode->predecessor->Ip);
 
-            if (tempSucc->id != s->localNode->id) {
-                log_error("[ERROR] successor->predecessor mismatch at node %d\n", s->localNode->id);
-            }
-            if (tempPred->id != s->localNode->id) {
-                log_error("[ERROR] predecessor->successor mismatch at node %d\n", s->localNode->id);
-            }
-
-            pthread_mutex_lock(&s->lock);
-            int sock = init_socket(tempSucc->Ip, s->port);
-            pthread_mutex_unlock(&s->lock);
-
-            if (!sock) {
-                log_error("Could not initiate socket to node %d in IP: ", tempSucc->id, tempSucc->Ip);
+            if (tempSucc == NULL || tempPred == NULL) {
+                log_error("[ERROR] CHECK_RING: could not fetch neighbour info at node %d\n", s->localNode->id);
+                if (tempSucc) freeNode(tempSucc);
+                if (tempPred) freeNode(tempPred);
                 return;
             }
 
-            // Send CHECK_RING to following node in the ring
+            // Verify successor's predecessor points back to us
+            if (tempSucc->predecessor == NULL || tempSucc->predecessor->id != s->localNode->id)
+                log_error("[ERROR] successor->predecessor mismatch at node %d\n", s->localNode->id);
+
+            // Verify predecessor's successor points back to us
+            if (tempPred->successor == NULL || tempPred->successor->id != s->localNode->id)
+                log_error("[ERROR] predecessor->successor mismatch at node %d\n", s->localNode->id);
+
+            int sock = init_socket(s->localNode->successor->Ip, s->port);
+
+            if (sock < 0) {
+                log_error("CHECK_RING: could not connect to successor node %d at %s",
+                          s->localNode->successor->id, s->localNode->successor->Ip);
+                freeNode(tempSucc);
+                freeNode(tempPred);
+                return;
+            }
+
             char request[64];
             snprintf(request, sizeof(request), "CHECK_RING %d\n", startingNode);
 
             if (send(sock, request, strlen(request), 0) < 0) {
                 perror("send");
                 close(sock);
+                freeNode(tempSucc);
+                freeNode(tempPred);
                 return;
             }
 
             close(sock);
+            freeNode(tempSucc);
+            freeNode(tempPred);
         } else {
             log_warn("Invalid CHECK_RING command at node %d", s->localNode->id);
-            return;
         }
     }
     else {
