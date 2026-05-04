@@ -88,6 +88,7 @@ Node* remote_find_successor(t_server* s, int port, int targetId);
 Node* remote_find_predecessor(t_server* s, int port, int targetId);
 
 //void remote_notify(const char* remote_ip, Node* potentialPredecessor);
+void remote_fix_fingers(t_server* s);
 void remote_join(const char* existingIp, int port, t_server* s);
 void remote_notify(t_server* s, int port, const char* existingIp);
 void remote_stabilize(t_server* s, int port);

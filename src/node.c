@@ -430,7 +430,6 @@ void fix_fingers(Node* node) {
 
     //Update file FingerTable
     saveFingerTableToFile(node, "nodeInfo/FingerTable");
-
 }
     
 //Second version of notify, supports concurrent node joins
@@ -581,7 +580,7 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
         FingerTableEntry* entry = &node->fingerTable[i];
         
         int succ_id = (entry->successor != NULL) ? entry->successor->id : -1;
-        const char* succ_ip = (entry->successor != NULL && entry->Ip[0] != '\0') ? entry->Ip : "NONE";
+        const char* succ_ip = (entry->successor != NULL && entry->successor->Ip[0] != '\0') ? entry->successor->Ip : "NONE";
 
         fprintf(file, "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%s\n",
                 i,
@@ -1221,6 +1220,30 @@ void remote_check_ring(t_server* s) {
     close(sock);
 
     log_info("Check ring process started in node %d %s", local_id, local_ip);
+
+    return;
+}
+
+
+void remote_fix_fingers(t_server* s) {
+    int i = 1 + rand() % NODE_ID_LENGTH;
+
+    pthread_mutex_lock(&s->lock);
+    int start = s->localNode->fingerTable[i-1].start;
+    int local_id = s->localNode->id;
+    pthread_mutex_unlock(&s->lock);
+
+    Node* temp = remote_find_successor(s, s->port, start);
+
+    if (temp != NULL) {
+        pthread_mutex_lock(&s->lock);
+        s->localNode->fingerTable[i-1].successor = temp;
+        pthread_mutex_unlock(&s->lock);
+
+        saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+    } else {
+        log_error("Could not succesfully update fingerTable entry %d in node %d", i, local_id);
+    }
 
     return;
 }

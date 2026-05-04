@@ -22,7 +22,7 @@ void* maintanance_worker(void* arg) {
         time_t now = time(NULL);
 
         //Checks time intervals to execute stabilization
-        if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000) {
+        if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000.0) {
             log_info("[MAINTENANCE] Starting stabilization for Node %d\n", mt->localServer->localNode->id);
 
             remote_stabilize(mt->localServer, mt->localServer->port);
@@ -33,12 +33,16 @@ void* maintanance_worker(void* arg) {
         }
 
         //Checks time intervals to execute fix_fingers()
-        if ((now-last_fixed_time) >= mt->fix_fingers_interval_ms / 1000) {
+        if ((now - last_fixed_time) >= mt->fix_fingers_interval_ms / 1000.0) {
             log_info("[MAINTENANCE] Starting fix_fingers for Node %d\n", mt->localServer->localNode->id);
 
+            /*
             pthread_mutex_lock(&mt->localServer->lock);
             fix_fingers(mt->localServer->localNode);
             pthread_mutex_unlock(&mt->localServer->lock);
+            */
+
+            remote_fix_fingers(mt->localServer);
 
             last_fixed_time = now;
 
