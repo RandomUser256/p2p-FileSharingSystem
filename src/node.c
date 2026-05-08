@@ -160,7 +160,7 @@ Node* loadNodeFromFile(const char* filepath) {
     fclose(file);
 
     //Checks that the file was not empty
-    if (!hasData || id == 0 || ip[0] == '\0') {
+    if (!hasData || ip[0] == '\0') {
         printf("No data read from node file\n");
         return NULL;
     }
@@ -592,6 +592,7 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
     }
 
     fclose(file);
+
     log_info("[INFO] Finger table for node %d saved to %s\n", node->id, filepath);
 }
 
@@ -819,7 +820,17 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     //Extract response from server
     while (total < sizeof(response) - 1) {
         n = recv(sock, response + total, sizeof(response) - total - 1, 0);
-        if (n <= 0) break;
+
+        if (n < 0) {
+            log_error("recv failed: %s", strerror(errno));
+            break;
+        }
+
+        //Empty node response, treat as error
+        if (n == 0) {
+            log_error("recv: connection closed by server");
+            break; 
+        }
 
         total += n;
         response[total] = '\0';
@@ -827,8 +838,9 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
         if (strchr(response, '\n')) break; // end of message
     }
 
-    if (n <= 0) {
-        perror("recv");
+    if (total == 0) {
+        //perror("recv");
+        log_error("Failed to receive response from node at IP %s", ip);
         close(sock);
         return NULL;
     }
@@ -931,6 +943,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
             if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
                 freeNode(predecessor);
                 predecessor = createNode(node_id, node_ip, "shared/files");
+                predecessor = remote_get_node(s, port, predecessor->Ip); // Get full node info for the closest preceding finger
             } else {
                 fprintf(stderr, "RPC error: %s\n", response);
                 close(sock);
@@ -1105,10 +1118,44 @@ void remote_stabilize(t_server* s, int port) {
 
     Node* x = temp->predecessor;
 
+    if (x == NULL) {
+        log_warn("[WARN] Successor's predecessor is NULL\n");
+        freeNode(temp);
+        return;
+    }
+
+    /*
     if (in_open_interval(x->id, local_id, temp->id)) {
         pthread_mutex_lock(&s->lock);
         if (s->localNode != NULL) {
             s->localNode->successor = x;
+        }
+        pthread_mutex_unlock(&s->lock);
+    }*/
+
+    if (in_open_interval(x->id, local_id, temp->id)) {
+        // Allocate new memory for the successor
+        Node* new_successor = malloc(sizeof(Node));
+        if (new_successor == NULL) {
+            perror("Failed to allocate memory for new successor");
+            return; 
+        }
+
+        // Copy the data from x into the new allocation
+        memcpy(new_successor, x, sizeof(Node));
+
+        pthread_mutex_lock(&s->lock);
+        if (s->localNode != NULL) {
+            // PREVENT LEAK: If we already had a successor, free it first
+            if (s->localNode->successor != NULL) {
+                freeNode(s->localNode->successor);
+            }
+            
+            
+            s->localNode->successor = new_successor;
+        } else {
+            // Cleanup if localNode vanished during the lock wait
+            free(new_successor); 
         }
         pthread_mutex_unlock(&s->lock);
     }
@@ -1238,9 +1285,8 @@ void remote_fix_fingers(t_server* s) {
     if (temp != NULL) {
         pthread_mutex_lock(&s->lock);
         s->localNode->fingerTable[i-1].successor = temp;
-        pthread_mutex_unlock(&s->lock);
-
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+        pthread_mutex_unlock(&s->lock);
     } else {
         log_error("Could not succesfully update fingerTable entry %d in node %d", i, local_id);
     }

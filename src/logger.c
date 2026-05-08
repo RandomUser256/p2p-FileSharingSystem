@@ -1,8 +1,9 @@
 #include <stdio.h>
 #include <stdarg.h>
+#include <stdatomic.h>
 #include "logger.h"
 
-LogLevel CURRENT_LOG_LEVEL = LOG_INFO;
+_Atomic LogLevel CURRENT_LOG_LEVEL = LOG_INFO;
 
 void set_log_level(LogLevel level) {
     CURRENT_LOG_LEVEL = level;

@@ -19,7 +19,7 @@ void* maintanance_worker(void* arg) {
     log_info("[MAINTENANCE] Background thread started for Node %d\n", mt->localServer->localNode->id);
 
     while (mt->running) {
-        time_t now = time(NULL);
+        time_t now = clock_gettime(CLOCK_MONOTONIC);
 
         //Checks time intervals to execute stabilization
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000.0) {

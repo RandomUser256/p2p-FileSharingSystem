@@ -282,6 +282,97 @@ void *server_loop(void *arg) {
     return NULL;
 }
 
+// ---- worker-thread infrastructure for outgoing TCP calls ----
+// Keeps server_loop's select() thread non-blocking (Fix #3).
+
+typedef struct {
+    t_server *s;
+    int       port;
+    char      ip[64];
+} notify_task_t;
+
+typedef struct {
+    t_server *s;
+    int       port;
+    char      ip[64];
+} join_task_t;
+
+typedef struct {
+    t_server *s;
+    int       port;
+    int       startingNode;
+    int       local_id;
+    char      succ_ip[MAX_IP_LENGTH];
+    char      pred_ip[MAX_IP_LENGTH];
+} check_ring_task_t;
+
+static void *notify_worker(void *arg) {
+    notify_task_t *task = (notify_task_t *)arg;
+    remote_notify(task->s, task->port, task->ip);
+    free(task);
+    return NULL;
+}
+
+static void *join_worker(void *arg) {
+    join_task_t *task = (join_task_t *)arg;
+    remote_join(task->ip, task->port, task->s);
+    free(task);
+    return NULL;
+}
+
+static void *check_ring_worker(void *arg) {
+    check_ring_task_t *task = (check_ring_task_t *)arg;
+    t_server *s    = task->s;
+    int       port = task->port;
+
+    Node *tempSucc = remote_get_node(s, port, task->succ_ip);
+    Node *tempPred = remote_get_node(s, port, task->pred_ip);
+
+    if (tempSucc == NULL || tempPred == NULL) {
+        log_error("[ERROR] CHECK_RING: could not fetch neighbour info at node %d", task->local_id);
+        if (tempSucc) freeNode(tempSucc);
+        if (tempPred) freeNode(tempPred);
+        free(task);
+        return NULL;
+    }
+
+    if (tempSucc->predecessor == NULL || tempSucc->predecessor->id != task->local_id)
+        log_error("[ERROR] successor->predecessor mismatch at node %d", task->local_id);
+
+    if (tempPred->successor == NULL || tempPred->successor->id != task->local_id)
+        log_error("[ERROR] predecessor->successor mismatch at node %d", task->local_id);
+
+    int sock = init_socket(task->succ_ip, port);
+    if (sock >= 0) {
+        char request[64];
+        snprintf(request, sizeof(request), "CHECK_RING %d\n", task->startingNode);
+        if (send(sock, request, strlen(request), 0) < 0)
+            perror("send CHECK_RING forward");
+        close(sock);
+    } else {
+        log_error("CHECK_RING: could not connect to successor at %s", task->succ_ip);
+    }
+
+    freeNode(tempSucc);
+    freeNode(tempPred);
+    free(task);
+    return NULL;
+}
+
+static void spawn_detached(void *(*fn)(void *), void *arg) {
+    pthread_t      tid;
+    pthread_attr_t attr;
+    pthread_attr_init(&attr);
+    pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+    if (pthread_create(&tid, &attr, fn, arg) != 0) {
+        log_error("spawn_detached: pthread_create failed");
+        free(arg);
+    }
+    pthread_attr_destroy(&attr);
+}
+
+// --------------------------------------------------------------
+
 void handle_command(t_server *s, t_client *cli, char *msg) {
     char cmd[64];
 
@@ -300,8 +391,15 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         char ip[64];
 
         if (sscanf(msg, "JOIN %63s", ip) == 1) {
-            remote_join(ip, s->port, s);  // your existing function
             send(cli->fd, "OK\n", 3, 0);
+            join_task_t *task = malloc(sizeof(join_task_t));
+            if (task) {
+                task->s    = s;
+                task->port = defaultPort;
+                strncpy(task->ip, ip, sizeof(task->ip) - 1);
+                task->ip[sizeof(task->ip) - 1] = '\0';
+                spawn_detached(join_worker, task);
+            }
         } else {
             send(cli->fd, "ERROR Invalid JOIN\n", 19, 0);
         }
@@ -310,10 +408,17 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     else if (strcmp(cmd, "STABILIZE") == 0) {
         char existingIp[64];
         if (sscanf(msg, "STABILIZE %63s", existingIp) == 1) {
-            remote_notify(s, defaultPort, existingIp);
             send(cli->fd, "OK\n", 3, 0);
+            notify_task_t *task = malloc(sizeof(notify_task_t));
+            if (task) {
+                task->s    = s;
+                task->port = defaultPort;
+                strncpy(task->ip, existingIp, sizeof(task->ip) - 1);
+                task->ip[sizeof(task->ip) - 1] = '\0';
+                spawn_detached(notify_worker, task);
+            }
         } else {
-            send(cli->fd, "Invalid arguments given for stabilize\n", 3, 0);
+            send(cli->fd, "Invalid arguments given for stabilize\n", 38, 0);
         }
     }
 
@@ -413,61 +518,41 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         int startingNode = 0;
 
         if (sscanf(msg, "CHECK_RING %d", &startingNode) == 1) {
-            // Stop propagation when the walk returns to the originating node
+            pthread_mutex_lock(&s->lock);
+
             if (s->localNode->id == startingNode) {
                 log_info("Completed ring check at node %d with IP: %s", s->localNode->id, s->localNode->Ip);
+                pthread_mutex_unlock(&s->lock);
                 return;
             }
 
-            if (s->localNode->predecessor == NULL) {
-                log_warn("CHECK_RING: predecessor is NULL at node %d, ring not fully formed", s->localNode->id);
+            if (s->localNode->predecessor == NULL || s->localNode->successor == NULL) {
+                log_warn("CHECK_RING: predecessor or successor is NULL at node %d, ring not fully formed", s->localNode->id);
+                pthread_mutex_unlock(&s->lock);
                 return;
             }
 
-            Node* tempSucc = remote_get_node(s, s->port, s->localNode->successor->Ip);
-            Node* tempPred = remote_get_node(s, s->port, s->localNode->predecessor->Ip);
-
-            if (tempSucc == NULL || tempPred == NULL) {
-                log_error("[ERROR] CHECK_RING: could not fetch neighbour info at node %d\n", s->localNode->id);
-                if (tempSucc) freeNode(tempSucc);
-                if (tempPred) freeNode(tempPred);
+            // Snapshot all fields we need before releasing the lock.
+            check_ring_task_t *task = malloc(sizeof(check_ring_task_t));
+            if (!task) {
+                pthread_mutex_unlock(&s->lock);
                 return;
             }
+            task->s            = s;
+            task->port         = s->port;
+            task->startingNode = startingNode;
+            task->local_id     = s->localNode->id;
+            strncpy(task->succ_ip, s->localNode->successor->Ip, sizeof(task->succ_ip) - 1);
+            task->succ_ip[sizeof(task->succ_ip) - 1] = '\0';
+            strncpy(task->pred_ip, s->localNode->predecessor->Ip, sizeof(task->pred_ip) - 1);
+            task->pred_ip[sizeof(task->pred_ip) - 1] = '\0';
+            pthread_mutex_unlock(&s->lock);
 
-            // Verify successor's predecessor points back to us
-            if (tempSucc->predecessor == NULL || tempSucc->predecessor->id != s->localNode->id)
-                log_error("[ERROR] successor->predecessor mismatch at node %d\n", s->localNode->id);
-
-            // Verify predecessor's successor points back to us
-            if (tempPred->successor == NULL || tempPred->successor->id != s->localNode->id)
-                log_error("[ERROR] predecessor->successor mismatch at node %d\n", s->localNode->id);
-
-            int sock = init_socket(s->localNode->successor->Ip, s->port);
-
-            if (sock < 0) {
-                log_error("CHECK_RING: could not connect to successor node %d at %s",
-                          s->localNode->successor->id, s->localNode->successor->Ip);
-                freeNode(tempSucc);
-                freeNode(tempPred);
-                return;
-            }
-
-            char request[64];
-            snprintf(request, sizeof(request), "CHECK_RING %d\n", startingNode);
-
-            if (send(sock, request, strlen(request), 0) < 0) {
-                perror("send");
-                close(sock);
-                freeNode(tempSucc);
-                freeNode(tempPred);
-                return;
-            }
-
-            close(sock);
-            freeNode(tempSucc);
-            freeNode(tempPred);
+            spawn_detached(check_ring_worker, task);
         } else {
+            pthread_mutex_lock(&s->lock);
             log_warn("Invalid CHECK_RING command at node %d", s->localNode->id);
+            pthread_mutex_unlock(&s->lock);
         }
     }
     else {
