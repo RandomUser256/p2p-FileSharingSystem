@@ -209,13 +209,17 @@ void acceptRegistration(t_server *s) {
 
 //Monitors file descriptors for incoming connections and messages, and processes them accordingly
 void monitorFDs(t_server *s) {
-    if (select(s->max_fd + 1, &s->readfds, &s->writefds, NULL, NULL) < 0) fatalError(s);
+    struct timeval tv = {1, 0};
+    int ret = select(s->max_fd + 1, &s->readfds, &s->writefds, NULL, &tv);
+    if (ret < 0) {
+        if (errno == EINTR) return; // signal interrupted select — retry cleanly
+        fatalError(s);
+    }
+    if (ret == 0) return; // timeout — nothing ready
     int fd = 0;
     while (fd <= s->max_fd)
     {
-        //Refresh readfds and writefds for each iteration of the loop, to determine which ones need attention
         if (FD_ISSET(fd, &s->readfds))
-            //If the file descriptor is the server socket, it means a new connection is incoming, so we call acceptRegistration to handle it. Otherwise, it's an existing client sending a message, so we call processMessage to handle the message.
             (fd == s->sockfd) ? acceptRegistration(s) : processMessage(s, fd);
         fd++;
     }
@@ -431,6 +435,11 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         if (sscanf(msg, "FIND_SUCCESSOR %d", &id) == 1) {
             pthread_mutex_lock(&s->lock);
             Node* succ = find_successor(s->localNode, id);
+            if (succ == NULL) {
+                pthread_mutex_unlock(&s->lock);
+                send(cli->fd, "ERROR No successor found\n", 25, 0);
+                return;
+            }
             int succ_id = succ->id;
             char succ_ip[64];
             strncpy(succ_ip, succ->Ip, sizeof(succ_ip) - 1);

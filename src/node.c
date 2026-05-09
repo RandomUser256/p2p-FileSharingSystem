@@ -167,10 +167,19 @@ Node* loadNodeFromFile(const char* filepath) {
 
     Node* node = createNode(id, ip, path);
 
+    // createNode() defaults both to self-pointer; clear them so the
+    // restore below reflects exactly what the file recorded.
+    node->successor   = NULL;
+    node->predecessor = NULL;
+
     if (succId != -1)
         node->successor   = createNode(succId, succIp, "shared/files");
+    else
+        node->successor   = node; // no successor on disk → treat as single-node ring
+
     if (predId != -1)
         node->predecessor = createNode(predId, predIp, "shared/files");
+    // predId == -1 means NULL predecessor (e.g. just after join) — leave as NULL
 
     //Prints success of loading process
     fprintf(stderr, "Loaded node: ID=%d IP=%s PATH=%s succ=%d pred=%d\n",
@@ -192,11 +201,19 @@ void saveNodeToFile(Node* node, const char* filepath) {
     fprintf(file, "ip=%s\n", node->Ip);
     fprintf(file, "fileContentPath=%s\n", node->fileContentPath);
 
-    if (node->successor)
+    if (node->successor && node->successor != node)
         fprintf(file, "successor=%d %s\n", node->successor->id, node->successor->Ip);
+    else if (node->successor == node)
+        fprintf(file, "successor=%d %s\n", node->id, node->Ip);
+    else
+        fprintf(file, "successor=-1 NONE\n");
 
-    if (node->predecessor)
+    if (node->predecessor && node->predecessor != node)
         fprintf(file, "predecessor=%d %s\n", node->predecessor->id, node->predecessor->Ip);
+    else if (node->predecessor == node)
+        fprintf(file, "predecessor=%d %s\n", node->id, node->Ip);
+    else
+        fprintf(file, "predecessor=-1 NONE\n");
 
     fclose(file);
 }
@@ -795,6 +812,15 @@ int init_socket(const char* ip, int port) {
 
 //Allows you to retrieve full node information from an Ip
 Node* remote_get_node(t_server* s, int port, const char* ip) {
+    // Avoid TCP self-connection deadlock: serve the request locally
+    pthread_mutex_lock(&s->lock);
+    if (s->localNode && strcmp(ip, s->localNode->Ip) == 0) {
+        Node* copy = copyNode(s->localNode);
+        pthread_mutex_unlock(&s->lock);
+        return copy;
+    }
+    pthread_mutex_unlock(&s->lock);
+
     int sock = init_socket(ip, port);
 
     if (sock < 0) {
@@ -883,13 +909,24 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
     localNodeIp[sizeof(localNodeIp) - 1] = '\0';
     pthread_mutex_unlock(&s->lock);
 
+    int max_iters = MAX_NUMBER_NODES + 1;
     while (!half_left_open_interval(targetId, predecessor->id, predecessor->successor->id)) {
+        if (--max_iters < 0) {
+            log_warn("remote_find_predecessor: iteration limit reached for target %d", targetId);
+            break;
+        }
         if (strcmp(localNodeIp, predecessor->Ip) == 0) {
             pthread_mutex_lock(&s->lock);
             Node* cpf = closest_preceding_finger(s->localNode, targetId);
             Node* cpf_copy = copyNode(cpf);
             pthread_mutex_unlock(&s->lock);
-            
+
+            // No-progress guard: finger table can't advance further, exit loop
+            if (cpf_copy->id == predecessor->id) {
+                freeNode(cpf_copy);
+                break;
+            }
+
             freeNode(predecessor);
             predecessor = cpf_copy;
 
@@ -942,8 +979,9 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
 
             if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
                 freeNode(predecessor);
-                predecessor = createNode(node_id, node_ip, "shared/files");
-                predecessor = remote_get_node(s, port, predecessor->Ip); // Get full node info for the closest preceding finger
+                Node* tmpNode = createNode(node_id, node_ip, "shared/files");
+                predecessor = remote_get_node(s, port, tmpNode->Ip);
+                freeNode(tmpNode);
             } else {
                 fprintf(stderr, "RPC error: %s\n", response);
                 close(sock);
@@ -980,7 +1018,9 @@ Node* remote_find_successor(t_server* s, int port, int targetId) {
 
     Node* succ = remote_get_node(s, port, temp->successor->Ip);
 
+    pthread_mutex_lock(&s->lock);
     log_info("Succesfull find_successor process completed at node %d %s", s->localNode->id, s->localNode->Ip);
+    pthread_mutex_unlock(&s->lock);
 
     freeNode(temp);
     return succ;
@@ -1022,25 +1062,63 @@ void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node*
     */
 
 void remote_join(const char* existingIp, int port, t_server* s) {
+    pthread_mutex_lock(&s->lock);
+    s->localNode->predecessor = NULL;
+    int local_id = s->localNode->id;
+    pthread_mutex_unlock(&s->lock);
+
+    // Ask the entry-point node directly for our successor instead of
+    // starting the traversal from our own self-pointing ring.
     int sock = init_socket(existingIp, port);
     if (sock < 0) {
         return;
     }
 
-    pthread_mutex_lock(&s->lock);
-    s->localNode->predecessor = NULL;
-    pthread_mutex_unlock(&s->lock);
-    
-    Node* tempSucc = remote_find_successor(s, port, s->localNode->id);
+    char request[64];
+    snprintf(request, sizeof(request), "FIND_SUCCESSOR %d\n", local_id);
+    if (send(sock, request, strlen(request), 0) < 0) {
+        perror("send");
+        close(sock);
+        return;
+    }
 
-    pthread_mutex_lock(&s->lock);
-    s->localNode->successor = tempSucc; 
-    pthread_mutex_unlock(&s->lock);
-
-
+    char response[128] = {0};
+    int total = 0, n;
+    while (total < (int)sizeof(response) - 1) {
+        n = recv(sock, response + total, sizeof(response) - total - 1, 0);
+        if (n <= 0) break;
+        total += n;
+        response[total] = '\0';
+        if (strchr(response, '\n')) break;
+    }
     close(sock);
 
-    return;
+    int succ_id;
+    char succ_ip[64];
+    if (sscanf(response, "NODE %d %63s", &succ_id, succ_ip) == 2) {
+        Node* tempSucc = createNode(succ_id, succ_ip, "shared/files");
+        pthread_mutex_lock(&s->lock);
+
+        // Update localNode->successor
+        Node* old_succ = s->localNode->successor;
+        if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
+        s->localNode->successor = tempSucc;
+
+        // Keep fingerTable[0] in sync (separate allocation — remote_stabilize
+        // owns and frees localNode->successor independently)
+        Node* old_f0 = s->localNode->fingerTable[0].successor;
+        if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);
+        s->localNode->fingerTable[0].successor = createNode(succ_id, succ_ip, "shared/files");
+        strncpy(s->localNode->fingerTable[0].Ip, succ_ip, MAX_IP_LENGTH - 1);
+        s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
+
+        saveNodeToFile(s->localNode, "nodeInfo/Node");
+        saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+        pthread_mutex_unlock(&s->lock);
+        log_info("remote_join: joined ring, successor is node %d %s", succ_id, succ_ip);
+    } else {
+        log_error("remote_join: failed to parse FIND_SUCCESSOR response: %s", response);
+    }
 }
 
 
@@ -1284,7 +1362,22 @@ void remote_fix_fingers(t_server* s) {
 
     if (temp != NULL) {
         pthread_mutex_lock(&s->lock);
+
+        // Free the old finger entry (each slot owns its allocation)
+        Node* old_f = s->localNode->fingerTable[i-1].successor;
+        if (old_f != NULL && old_f != s->localNode) freeNode(old_f);
         s->localNode->fingerTable[i-1].successor = temp;
+        strncpy(s->localNode->fingerTable[i-1].Ip, temp->Ip, MAX_IP_LENGTH - 1);
+        s->localNode->fingerTable[i-1].Ip[MAX_IP_LENGTH - 1] = '\0';
+
+        // finger[0] == direct successor; keep localNode->successor in sync
+        if (i == 1) {
+            Node* old_succ = s->localNode->successor;
+            if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
+            s->localNode->successor = createNode(temp->id, temp->Ip, temp->fileContentPath);
+            saveNodeToFile(s->localNode, "nodeInfo/Node");
+        }
+
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
         pthread_mutex_unlock(&s->lock);
     } else {

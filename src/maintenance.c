@@ -8,18 +8,24 @@
 
 #include "node.h"
 
+double get_monotonic_seconds() {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
 
 //Function that loops in the background
 //Checks for time intervals to routinely execute remote_stabilize() and fix_fingers()
 void* maintanance_worker(void* arg) {
     MaintenanceThread* mt = (MaintenanceThread*)arg;
-    time_t last_stabilized_time = time(NULL);
-    time_t last_fixed_time = time(NULL);
+    double last_stabilized_time = get_monotonic_seconds();
+    double last_fixed_time = get_monotonic_seconds();
 
     log_info("[MAINTENANCE] Background thread started for Node %d\n", mt->localServer->localNode->id);
 
     while (mt->running) {
-        time_t now = clock_gettime(CLOCK_MONOTONIC);
+        //time_t now = clock_gettime(CLOCK_MONOTONIC);
+        double now = get_monotonic_seconds();
 
         //Checks time intervals to execute stabilization
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000.0) {

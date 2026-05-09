@@ -16,7 +16,7 @@ typedef enum {
 } LogLevel;
 
 // Global log level
-extern LogLevel CURRENT_LOG_LEVEL;
+extern _Atomic LogLevel CURRENT_LOG_LEVEL;
 
 // Control function
 void set_log_level(LogLevel level);

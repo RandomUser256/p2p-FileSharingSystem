@@ -2,6 +2,7 @@
 #define MAINTENANCE_H
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <time.h>
 
 typedef struct s_server t_server; 
@@ -16,7 +17,7 @@ typedef struct {
     t_server* localServer;
     int stabilize_interval_ms;    // milliseconds between stabilize calls
     int fix_fingers_interval_ms;  // milliseconds between fix_fingers calls
-    volatile int running;         // flag to stop maintenance thread
+    _Atomic int running;
     pthread_t thread_id;
 } MaintenanceThread;
 

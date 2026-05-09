@@ -12,7 +12,6 @@
 
 /*
 NOTE: Compile all source files together:
-gcc -pthread main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c -o main -lm
 
 gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c -o main -pthread -lm
 
@@ -40,8 +39,7 @@ int main() {
 
     
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
-    loadFingerTableFromFile(localNode, "nodeInfo/FingerTable");
-    
+
     char input[100];
 
     if (localNode == NULL) {
@@ -120,18 +118,18 @@ int main() {
             Node* succ = remote_find_successor(serv, serv->port, serv->localNode->id);
 
             if (succ != NULL) {
-                printf("Successor for node found, id: %d IP: %s", succ->id, succ->Ip);
+                printf("Successor for node found, id: %d IP: %s \n", succ->id, succ->Ip);
             } else {
-                printf("Problem occured with locating successor.");
+                printf("Problem occured with locating successor.\n");
             }
         }
         else if (strcmp(input, "p") == 0) {
             Node* pred = remote_find_predecessor(serv, serv->port, serv->localNode->id);
 
             if (pred != NULL) {
-                printf("Predecessor for node found, id: %d IP: %s", pred->id, pred->Ip);
+                printf("Predecessor for node found, id: %d IP: %s \n", pred->id, pred->Ip);
             } else {
-                printf("Problem occured with locating predecessor.");
+                printf("Problem occured with locating predecessor. \n");
             }
         }
         else if (strcmp(input, "t") == 0) {
