@@ -114,7 +114,16 @@ int main() {
             remote_join(existingIp, 8080, serv);  // Empty string for username (not used with TCP)
         }
         else if (strcmp(input, "f") == 0) {
-            Node* succ = remote_find_successor(serv, serv->port, serv->localNode->id);
+            int targetId = 0;
+
+            printf("Enter ID to find its successor node: ");
+
+            if (scanf("%d", &targetId) != 1) {
+                printf("Invalid input\n");
+                continue;
+            }
+
+            Node* succ = remote_find_successor(serv, serv->port, targetId);
 
             if (succ != NULL) {
                 printf("Successor for node found, id: %d IP: %s \n", succ->id, succ->Ip);
