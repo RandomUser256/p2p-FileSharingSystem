@@ -135,9 +135,16 @@ void fatalError(t_server *s) {
 void sendNotification(t_server *s, int fd, char *msg) {
     t_client *cli = s->head;
     while (cli) {
-        if (FD_ISSET(cli->fd, &s->writefds) && cli->fd != fd)
-            if (send(cli->fd, msg, strlen(msg), 0) < 0) fatalError(s);
-        cli = cli->next;
+        t_client *next = cli->next; // save before possible removal
+        if (FD_ISSET(cli->fd, &s->writefds) && cli->fd != fd) {
+            if (send(cli->fd, msg, strlen(msg), 0) < 0) {
+                // Peer disconnected mid-loop — clean up and continue instead
+                // of crashing the server. The stale fd will be removed here.
+                FD_CLR(cli->fd, &s->active_fds);
+                removeClient(s, cli->fd);
+            }
+        }
+        cli = next;
     }
 }
 
@@ -159,11 +166,9 @@ void sendMessage(t_server *s, t_client *cli) {
     }
 }
 
-//Removes client from linked list and sends a notification to all clients about the disconnection
+//Removes client from linked list and cleans up its file descriptor
 void deregisterClient(t_server *s, int fd, int cli_id) {
-    char buf[127];
-    sprintf(buf, "server: client %d just left\n", cli_id);
-    sendNotification(s, fd, buf);
+    (void)cli_id;
     FD_CLR(fd, &s->active_fds);
     removeClient(s, fd);
 }
@@ -252,8 +257,12 @@ void configAddr(t_server *s) {
 
 //Create socket and add it to the set of active file descriptors for select()
 void createSock(t_server *s) {
-    s->sockfd = socket(AF_INET, SOCK_STREAM, 0); 
+    s->sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (s->sockfd < 0)  fatalError(s);
+
+    // Allow immediate rebind after crash — prevents EADDRINUSE during TIME_WAIT
+    int opt = 1;
+    setsockopt(s->sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     FD_SET(s->sockfd, &s->active_fds);
     s->max_fd = s->sockfd;

@@ -37,7 +37,6 @@ TODO
 int main() {
     set_log_level(LOG_NONE); // Set to LOG_INFO or LOG_DEBUG for more detailed output
 
-    
     Node* localNode = loadNodeFromFile("nodeInfo/Node");
 
     char input[100];
