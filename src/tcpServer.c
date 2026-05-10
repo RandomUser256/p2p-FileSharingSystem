@@ -418,6 +418,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         }
     }
 
+    //Executes remote notify operation that is part of stabilize routine
     else if (strcmp(cmd, "STABILIZE") == 0) {
         char existingIp[64];
         if (sscanf(msg, "STABILIZE %63s", existingIp) == 1) {
