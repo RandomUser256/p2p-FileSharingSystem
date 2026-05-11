@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Read(//mnt/c/Users/maxim/OneDrive/Documents/GitHub/**)",
-      "Bash(gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c -o main -pthread -lm)",
-      "Bash(wsl *)"
-    ]
-  }
-}
