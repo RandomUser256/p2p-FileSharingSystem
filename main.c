@@ -50,10 +50,11 @@ int main() {
         if (fgets(input, sizeof(input), stdin) == NULL) {
             return 0; // Handle Ctrl+D (EOF)
         }
+        input[strcspn(input, "\r\n")] = '\0';
 
         char newIP[16];
         strncpy(newIP, input, sizeof(newIP) - 1);
-        newIP[sizeof(newIP) - 1] = '\0'; // Read the IP address of an existing node in the network
+        newIP[sizeof(newIP) - 1] = '\0';
 
         localNode = createNode(0, newIP, "shared/files");
     } else {
@@ -103,10 +104,11 @@ int main() {
             if (fgets(input, sizeof(input), stdin) == NULL) {
                 break; // Handle Ctrl+D (EOF)
             }
+            input[strcspn(input, "\r\n")] = '\0';
 
             char existingIp[16];
             strncpy(existingIp, input, sizeof(existingIp) - 1);
-            existingIp[sizeof(existingIp) - 1] = '\0'; // Read the IP address of an existing node in the network
+            existingIp[sizeof(existingIp) - 1] = '\0';
 
             printf("Joining node at %s...\n", existingIp);
 

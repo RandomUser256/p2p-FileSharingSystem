@@ -1199,12 +1199,6 @@ void remote_stabilize(t_server* s, int port) {
 
     Node* x = temp->predecessor;
 
-    if (x == NULL) {
-        log_warn("[WARN] Successor's predecessor is NULL\n");
-        freeNode(temp);
-        return;
-    }
-
     /*
     if (in_open_interval(x->id, local_id, temp->id)) {
         pthread_mutex_lock(&s->lock);
@@ -1214,7 +1208,7 @@ void remote_stabilize(t_server* s, int port) {
         pthread_mutex_unlock(&s->lock);
     }*/
 
-    if (in_open_interval(x->id, local_id, temp->id)) {
+    if (x != NULL && in_open_interval(x->id, local_id, temp->id)) {
         Node* new_successor = createNode(x->id, x->Ip, x->fileContentPath);
         if (new_successor == NULL) {
             perror("Failed to allocate memory for new successor");
