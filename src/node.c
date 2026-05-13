@@ -496,7 +496,7 @@ void nodePrint(Node* node) {
     log_info("[INFO] Node ID: %d\n", node->id);
     log_info("[INFO] Node IP: %s\n", node->Ip);
     if (node->successor != NULL) {
-        log_info("[INFO] Node Successor ID: %d\n", node->successor->id);
+        log_info("[INFO] Node Successor ID: %d %s\n", node->successor->id, node->successor->Ip);
     } else {
         log_info("[INFO] Node Successor: NULL\n");
     }
@@ -504,6 +504,12 @@ void nodePrint(Node* node) {
         log_info("[INFO] Node File Content Path: %s\n", node->fileContentPath);
     } else {
         log_info("[INFO] Node File Content Path: None\n");
+    }
+}
+
+void fingerTablePrint(Node* node) {
+    for (int i=0; i < NODE_ID_LENGTH; i++) {
+        log_info("Start: %d, L.interval: %d, U.interval: %d, Successor_node: %d %s\n", node->fingerTable[i].start, node->fingerTable[i].lowerIntervalLimit, node->fingerTable[i].upperIntervalLimit, node->fingerTable[i].successor->id, node->fingerTable[i].successor->Ip);
     }
 }
 
@@ -515,7 +521,6 @@ void printNodeList(Node* head) {
         nodePrint(current);
         current = current->successor;
     } while (current != start);
-    
 }
 
 //Checks integrity of ring structure

@@ -149,6 +149,7 @@ int main() {
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
             // Get current node information
             nodePrint(localNode);
+            fingerTablePrint(localNode);
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
         } else if (strcmp(input, "e") == 0) {
             // Exit

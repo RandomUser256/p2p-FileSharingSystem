@@ -67,6 +67,7 @@ void stabilize(Node* node);
 void freeNode(Node* node);
 
 void nodePrint(Node* node);
+void fingerTablePrint(Node* node);
 void printNodeList(Node* head);
 void check_ring(Node* start);
 
