@@ -85,6 +85,7 @@ Node* find_predecessor_with_finger_table(Node* node, int id);
 */
 int init_socket(const char* ip, int port);
 Node* remote_get_node(t_server* s, int port, const char* ip);
+Node* finger_table_fallback(t_server* s, int port);
 Node* remote_find_successor(t_server* s, int port, int targetId);
 Node* remote_find_predecessor(t_server* s, int port, int targetId);
 

@@ -435,6 +435,10 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         }
     }
 
+    else if (strcmp(cmd, "FINGER_TABLE_FALLBACK") == 0) {
+        send(cli->fd, "Node succesfully reached\n", 28, 0);
+    }
+
     // --------------------
     // FIND_SUCCESSOR
     // --------------------
