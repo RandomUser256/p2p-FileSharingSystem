@@ -31,7 +31,7 @@ void* maintanance_worker(void* arg) {
         if ((now - last_stabilized_time) >= mt->stabilize_interval_ms / 1000.0) {
             log_info("[MAINTENANCE] Starting stabilization for Node %d\n", mt->localServer->localNode->id);
 
-            remote_stabilize(mt->localServer, mt->localServer->port);
+            if (!mt->localServer->stabilizing) remote_stabilize(mt->localServer, mt->localServer->port);
 
             last_stabilized_time = now;
 

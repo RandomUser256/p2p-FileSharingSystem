@@ -7,6 +7,7 @@
 #include <netdb.h>
 #include <unistd.h>
 #include <pthread.h>
+#include <stdbool.h>
 #include <time.h>
 
 #include "node.h"
@@ -44,6 +45,9 @@ typedef struct s_server {
     t_client *head;
 
     Node* localNode;
+
+    //Flag for guarding stabilize protocol
+    bool stabilizing;
 
     pthread_mutex_t lock;
 } t_server;

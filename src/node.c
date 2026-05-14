@@ -307,9 +307,12 @@ Node* copyNode(Node* node) {
 }
 
 void freeNode(Node* node) {
-    if (node != NULL) {
-        free(node);
-    }
+    if (node == NULL) return;
+    if (node->successor != NULL && node->successor != node)
+        free(node->successor);
+    if (node->predecessor != NULL && node->predecessor != node)
+        free(node->predecessor);
+    free(node);
 }
 
 Node* find_predecessor(Node* node, int targetId) {
@@ -496,14 +499,25 @@ void nodePrint(Node* node) {
     log_info("[INFO] Node ID: %d\n", node->id);
     log_info("[INFO] Node IP: %s\n", node->Ip);
     if (node->successor != NULL) {
-        log_info("[INFO] Node Successor ID: %d\n", node->successor->id);
+        log_info("[INFO] Node Successor ID: %d %s\n", node->successor->id, node->successor->Ip);
     } else {
         log_info("[INFO] Node Successor: NULL\n");
+    }
+    if (node->predecessor != NULL) {
+        log_info("[INFO] Node Predecessor ID: %d %s\n", node->predecessor->id, node->predecessor->Ip);
+    } else {
+        log_info("[INFO] Node Predecessor: NULL\n");
     }
     if (node->fileContentPath[0] != '\0') {
         log_info("[INFO] Node File Content Path: %s\n", node->fileContentPath);
     } else {
         log_info("[INFO] Node File Content Path: None\n");
+    }
+}
+
+void fingerTablePrint(Node* node) {
+    for (int i=0; i < NODE_ID_LENGTH; i++) {
+        log_info("Start: %d, L.interval: %d, U.interval: %d, Successor_node: %d %s\n", node->fingerTable[i].start, node->fingerTable[i].lowerIntervalLimit, node->fingerTable[i].upperIntervalLimit, node->fingerTable[i].successor->id, node->fingerTable[i].successor->Ip);
     }
 }
 
@@ -515,7 +529,6 @@ void printNodeList(Node* head) {
         nodePrint(current);
         current = current->successor;
     } while (current != start);
-    
 }
 
 //Checks integrity of ring structure
@@ -898,6 +911,60 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     return temp;
 }
 
+Node* finger_table_fallback(t_server* s, int port) {
+    for (int i = 0; i < NODE_ID_LENGTH; i++) {
+        pthread_mutex_lock(&s->lock);                                                                                                                                                                                       
+        Node* finger = s->localNode->fingerTable[i].successor;                                                                                                                                                              
+        if (finger == NULL || finger == s->localNode) {  
+            pthread_mutex_unlock(&s->lock);
+            continue;
+        }
+
+        char finger_ip[MAX_IP_LENGTH];                                                                                                                                                                                      
+        strncpy(finger_ip, s->localNode->fingerTable[i].Ip, MAX_IP_LENGTH - 1);                                                                                                                                             
+        finger_ip[MAX_IP_LENGTH - 1] = '\0';                                                                                                                                                                                
+        int finger_id = finger->id;    
+                                                                                                                                                                                             
+        pthread_mutex_unlock(&s->lock);
+
+        if (finger_ip[0] == '\0') continue;
+
+        int sock = init_socket(finger_ip, port);                                                                                                                                                                            
+        if (sock < 0) {
+            log_warn("finger_table_fallback: could not reach finger %d at %s", finger_id, finger_ip);
+            continue;
+        }                                                                                                                                                                                                                   
+        close(sock);
+
+        Node* candidate = remote_get_node(s, port, finger_ip);                                                                                                                                                              
+        if (candidate == NULL) continue;
+
+        pthread_mutex_lock(&s->lock);  
+
+        Node* old_succ = s->localNode->successor;                                                                                                                                                                           
+        if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);                                                                                                                                               
+        s->localNode->successor = candidate;
+
+        /*
+        Node* old_f0 = s->localNode->fingerTable[0].successor;                                                                                                                                                              
+        if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);                                                                                                                                                     
+        s->localNode->fingerTable[0].successor = createNode(candidate->id, candidate->Ip, candidate->fileContentPath);                                                                                                      
+        strncpy(s->localNode->fingerTable[0].Ip, candidate->Ip, MAX_IP_LENGTH - 1);                                                                                                                                         
+        s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0'; 
+        */
+        saveNodeToFile(s->localNode, "nodeInfo/Node");                                                                                                                                                                      
+        //saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");   
+
+        pthread_mutex_unlock(&s->lock);                                                                                                                                                                                     
+                                                                                                                                                                                                                            
+        log_info("finger_table_fallback: promoted finger %d (%s) as new successor", candidate->id, candidate->Ip);
+        return copyNode(candidate);
+    }
+
+    log_error("finger_table_fallback: no reachable finger found");                                                                                                                                                          
+    return NULL; 
+}
+
 //Call from tcpServer
 Node* remote_find_predecessor(t_server* s, int port, int targetId) {
     // Get a snapshot of the local node info while holding the lock to avoid race conditions
@@ -1005,11 +1072,6 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
 Node* remote_find_successor(t_server* s, int port, int targetId) {
     Node* temp = remote_find_predecessor(s, port, targetId);
 
-    //temp = remote_get_node(s, port, temp->Ip);
-    /*
-    log_info("Intermediate predecessor for find_successor process: %d %s", temp->id, temp->Ip);
-    log_info("Intermediate predecessor successor Ip: %s", temp->successor->Ip);
-    */
     if (temp == NULL) {
         log_error("remote_find_successor: remote_find_predecessor returned NULL for target %d\n", targetId);
         return NULL;
@@ -1068,12 +1130,6 @@ void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node*
 
 void remote_join(const char* existingIp, int port, t_server* s) {
     pthread_mutex_lock(&s->lock);
-
-    if (s->localNode->predecessor != NULL) {
-        freeNode(s->localNode->predecessor);
-    }
-
-    //Set predecessor to nulls
     s->localNode->predecessor = NULL;
     int local_id = s->localNode->id;
     pthread_mutex_unlock(&s->lock);
@@ -1110,13 +1166,13 @@ void remote_join(const char* existingIp, int port, t_server* s) {
         Node* tempSucc = createNode(succ_id, succ_ip, "shared/files");
         pthread_mutex_lock(&s->lock);
 
+        s->localNode->predecessor = NULL;
+
         // Update localNode->successor
         Node* old_succ = s->localNode->successor;
         if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
         s->localNode->successor = tempSucc;
 
-
-        /*
         // Keep fingerTable[0] in sync (separate allocation — remote_stabilize
         // owns and frees localNode->successor independently)
         Node* old_f0 = s->localNode->fingerTable[0].successor;
@@ -1127,8 +1183,6 @@ void remote_join(const char* existingIp, int port, t_server* s) {
 
         saveNodeToFile(s->localNode, "nodeInfo/Node");
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
-        */
-
         pthread_mutex_unlock(&s->lock);
         log_info("remote_join: joined ring, successor is node %d %s", succ_id, succ_ip);
     } else {
@@ -1150,40 +1204,24 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
     local_ip[sizeof(local_ip) - 1] = '\0';
     pthread_mutex_unlock(&s->lock);
 
-    Node* possiblePredecessor = remote_get_node(s, port, existingIp);
-    if (possiblePredecessor == NULL) {
-        log_warn("remote_notify: could not reach node at %s", existingIp);
+    // Self-notify (single-node ring) — no TCP needed, handle directly
+    if (strcmp(existingIp, local_ip) == 0) {
+        pthread_mutex_lock(&s->lock);
+        if (s->localNode->predecessor == NULL ||
+            in_open_interval(s->localNode->id, s->localNode->predecessor->id, s->localNode->id)) {
+            s->localNode->predecessor = s->localNode;
+        }
+        pthread_mutex_unlock(&s->lock);
         return;
     }
 
-    // Self-notify (single-node ring) — no TCP needed, handle directly
-    //if (strcmp(existingIp, local_ip) == 0) {
-        pthread_mutex_lock(&s->lock);
-        if (s->localNode->predecessor == NULL ||
-            in_open_interval(possiblePredecessor->id, s->localNode->predecessor->id, s->localNode->id)) {
-            
-            if (s->localNode->predecessor != NULL || s->localNode->predecessor != s->localNode) freeNode(s->localNode->predecessor);
-
-            s->localNode->predecessor = possiblePredecessor;
-        } else {
-            freeNode(possiblePredecessor);
-        }
-
-        saveNodeToFile(s->localNode, "nodeInfo/Node");
-
-        pthread_mutex_unlock(&s->lock);
-        //return;
-    //}
-
     // remote_get_node already avoids TCP self-connection via its self-detection guard
-    /*
     Node* otherNode = remote_get_node(s, port, existingIp);
     if (otherNode == NULL) {
         log_warn("remote_notify: could not reach node at %s", existingIp);
         return;
     }
 
-    
     pthread_mutex_lock(&s->lock);
     if (s->localNode != NULL &&
         (s->localNode->predecessor == NULL ||
@@ -1197,7 +1235,6 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
         freeNode(otherNode);
     }
     pthread_mutex_unlock(&s->lock);
-        */
 
     log_info("Succesfull notify process completed at node %d %s", local_id, local_ip);
 }
@@ -1205,6 +1242,8 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
 void remote_stabilize(t_server* s, int port) {
     // Get successor IP and node ID while holding lock
     pthread_mutex_lock(&s->lock);
+    s->stabilizing = true;
+
     if (s->localNode == NULL || s->localNode->successor == NULL) {
         pthread_mutex_unlock(&s->lock);
         log_warn("[WARN] Local node or successor is NULL in remote_stabilize\n");
@@ -1218,37 +1257,36 @@ void remote_stabilize(t_server* s, int port) {
     strncpy(local_ip, s->localNode->Ip, sizeof(local_ip) - 1);
     local_ip[sizeof(local_ip) - 1] = '\0';
     int local_port = s->port;
-
-    int successor_id = s->localNode->successor->id;
-
     pthread_mutex_unlock(&s->lock);
 
-    //Node* temp = remote_get_node(s, local_port, successor_ip);
-    /*
+    Node* temp = remote_get_node(s, local_port, successor_ip);
+
     if (temp == NULL) { 
         log_warn("[WARN] Could not get successor node info\n");
-        return;
+        
+        //Returns if the fallback was unsuccessfull
+        temp = finger_table_fallback(s, local_port);                                                                                                                                                                       
+        if (temp == NULL) { 
+            return;
+        }
     }
-        */
 
-    //Node* x = temp->predecessor;
+    Node* x = temp->predecessor;
 
-    Node* x = remote_find_predecessor(s, local_port, successor_id);
+    /*
+    if (in_open_interval(x->id, local_id, temp->id)) {
+        pthread_mutex_lock(&s->lock);
+        if (s->localNode != NULL) {
+            s->localNode->successor = x;
+        }
+        pthread_mutex_unlock(&s->lock);
+    }*/
 
-
-    bool xFreed = false;
-
-    if (x == NULL) {
-        log_warn("[WARN] Successor's predecessor is NULL\n");
-        freeNode(x);
-        xFreed = true;
-        //return;
-    }
-    else if (in_open_interval(x->id, local_id, successor_id)) {
+    if (x != NULL && in_open_interval(x->id, local_id, temp->id)) {
         Node* new_successor = createNode(x->id, x->Ip, x->fileContentPath);
         if (new_successor == NULL) {
             perror("Failed to allocate memory for new successor");
-            if (!xFreed) freeNode(x);
+            freeNode(temp);
             return;
         }
 
@@ -1259,13 +1297,11 @@ void remote_stabilize(t_server* s, int port) {
             s->localNode->successor = new_successor;
 
             // Keep fingerTable[0] in sync — matching stabilize()'s saveNodeToFile step
-            /*
             Node* old_f0 = s->localNode->fingerTable[0].successor;
             if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);
             s->localNode->fingerTable[0].successor = createNode(x->id, x->Ip, x->fileContentPath);
             strncpy(s->localNode->fingerTable[0].Ip, x->Ip, MAX_IP_LENGTH - 1);
             s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
-            */
 
             saveNodeToFile(s->localNode, "nodeInfo/Node");
             saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
@@ -1277,18 +1313,22 @@ void remote_stabilize(t_server* s, int port) {
 
     pthread_mutex_lock(&s->lock);
     if (s->localNode == NULL || s->localNode->successor == NULL) {
+        s->stabilizing = false;
+
         pthread_mutex_unlock(&s->lock);
-        if (!xFreed) freeNode(x);
+        freeNode(temp);
         return;
     }
     strncpy(successor_ip, s->localNode->successor->Ip, sizeof(successor_ip) - 1);
     successor_ip[sizeof(successor_ip) - 1] = '\0';
+
+    s->stabilizing = false;
     pthread_mutex_unlock(&s->lock);
 
     int sock = init_socket(successor_ip, local_port);
 
     if (sock < 0) {
-        if (!xFreed) freeNode(x);
+        freeNode(temp);
         return;
     }
 
@@ -1299,7 +1339,7 @@ void remote_stabilize(t_server* s, int port) {
     if (send(sock, request, strlen(request), 0) < 0) {
         perror("send");
         close(sock);
-        if (!xFreed) freeNode(x);
+        freeNode(temp);
         return;
     }
 
@@ -1324,24 +1364,22 @@ void remote_stabilize(t_server* s, int port) {
     if (n <= 0) {
         perror("recv");
         close(sock);
-        if (!xFreed) freeNode(x);
+        freeNode(temp);
         return;
     }
 
     response[total] = '\0';
 
-    //Logs errors on unsucessfull operations
+    //Parses information from response into temp variables
     if (strncmp(response, "OK", 2) != 0) {
         log_error(response);
-    } 
-    //Logs successfull operation
-    else {
-        log_info("Succesfull stabilize process completed at node %d %s", local_id, local_ip);
     }
 
     close(sock);
 
-    if (!xFreed) freeNode(x);
+    log_info("Succesfull stabilize process completed at node %d %s", local_id, local_ip);
+
+    freeNode(temp);
 
     return;
 }
@@ -1410,14 +1448,12 @@ void remote_fix_fingers(t_server* s) {
         s->localNode->fingerTable[i-1].Ip[MAX_IP_LENGTH - 1] = '\0';
 
         // finger[0] == direct successor; keep localNode->successor in sync
-        /*
         if (i == 1) {
             Node* old_succ = s->localNode->successor;
             if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
             s->localNode->successor = createNode(temp->id, temp->Ip, temp->fileContentPath);
             saveNodeToFile(s->localNode, "nodeInfo/Node");
         }
-            */
 
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
         pthread_mutex_unlock(&s->lock);

@@ -279,6 +279,8 @@ t_server *initServer(int port, Node* node) {
 
     s->localNode = node;
 
+    s->stabilizing = false;
+
     pthread_mutex_init(&s->lock, NULL);
     return s;
 }
