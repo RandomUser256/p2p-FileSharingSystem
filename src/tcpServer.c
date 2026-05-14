@@ -193,13 +193,11 @@ void processMessage(t_server *s, int fd) {
 
 void registerClient(t_server *s, int fd) {
     t_client *cli = addClient(s, fd);
-    char buf[127];
+    
     if (!cli) fatalError(s);
     FD_SET(cli->fd, &s->active_fds);
     if (cli->fd > s->max_fd)
         s->max_fd = cli->fd;
-    sprintf(buf, "server: client %d just arrived\n", cli->id);
-    sendNotification(s, fd, buf);
 }
 
 //Accepts a new connection, adds it to the linked list of clients and sends a notification to all clients about the new connection

@@ -120,8 +120,13 @@ int main() {
 
             if (scanf("%d", &targetId) != 1) {
                 printf("Invalid input\n");
+
+                while (getchar() != '\n' && getchar() != EOF);
                 continue;
             }
+
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF);
 
             Node* succ = remote_find_successor(serv, serv->port, targetId);
 
@@ -147,6 +152,7 @@ int main() {
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
             // Get current node information
             nodePrint(localNode);
+            fingerTablePrint(localNode);
             set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
         } else if (strcmp(input, "e") == 0) {
             // Exit

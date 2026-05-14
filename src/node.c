@@ -945,15 +945,13 @@ Node* finger_table_fallback(t_server* s, int port) {
         if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);                                                                                                                                               
         s->localNode->successor = candidate;
 
-        /*
-        Node* old_f0 = s->localNode->fingerTable[0].successor;                                                                                                                                                              
-        if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);                                                                                                                                                     
-        s->localNode->fingerTable[0].successor = createNode(candidate->id, candidate->Ip, candidate->fileContentPath);                                                                                                      
-        strncpy(s->localNode->fingerTable[0].Ip, candidate->Ip, MAX_IP_LENGTH - 1);                                                                                                                                         
-        s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0'; 
-        */
+        // old_succ (freed above) and fingerTable[0].successor alias the same pointer — do NOT free again.
+        s->localNode->fingerTable[0].successor = createNode(candidate->id, candidate->Ip, candidate->fileContentPath);
+        strncpy(s->localNode->fingerTable[0].Ip, candidate->Ip, MAX_IP_LENGTH - 1);
+        s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
+        
         saveNodeToFile(s->localNode, "nodeInfo/Node");                                                                                                                                                                      
-        //saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");   
+        saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");   
 
         pthread_mutex_unlock(&s->lock);                                                                                                                                                                                     
                                                                                                                                                                                                                             
@@ -1210,6 +1208,8 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
         if (s->localNode->predecessor == NULL ||
             in_open_interval(s->localNode->id, s->localNode->predecessor->id, s->localNode->id)) {
             s->localNode->predecessor = s->localNode;
+
+            saveNodeToFile(s->localNode, "nodeInfo/Node");
         }
         pthread_mutex_unlock(&s->lock);
         return;
