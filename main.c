@@ -122,8 +122,13 @@ int main() {
 
             if (scanf("%d", &targetId) != 1) {
                 printf("Invalid input\n");
+
+                while (getchar() != '\n' && getchar() != EOF);
                 continue;
             }
+
+            int c;
+            while ((c = getchar()) != '\n' && c != EOF);
 
             Node* succ = remote_find_successor(serv, serv->port, targetId);
 
@@ -146,11 +151,10 @@ int main() {
             // Test chord ring structure
             remote_check_ring(serv);
         } else if (strcmp(input, "g") == 0) {
-            set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
-            // Get current node information
-            nodePrint(localNode);
-            fingerTablePrint(localNode);
-            set_log_level(get_log_level() == LOG_NONE ? LOG_INFO : LOG_NONE);
+            pthread_mutex_lock(&serv->lock);
+            nodePrint(serv->localNode);
+            fingerTablePrint(serv->localNode);
+            pthread_mutex_unlock(&serv->lock);
         } else if (strcmp(input, "e") == 0) {
             // Exit
             printf("Exiting...\n");

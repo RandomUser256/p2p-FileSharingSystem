@@ -8,7 +8,7 @@ typedef struct s_server t_server;
 
 #define MAX_IP_LENGTH 16
 #define MAX_FILE_PATH_LENGTH 256
-#define NODE_ID_LENGTH 4 //in bits, equal to 16 total nodes
+#define NODE_ID_LENGTH 10 //in bits, equal to 16 total nodes
 #define MAX_NUMBER_NODES (1U << NODE_ID_LENGTH) //Maximum number of nodes in the network
 
 int in_open_interval(int id, int start, int end);
