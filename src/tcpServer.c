@@ -193,13 +193,11 @@ void processMessage(t_server *s, int fd) {
 
 void registerClient(t_server *s, int fd) {
     t_client *cli = addClient(s, fd);
-    char buf[127];
+
     if (!cli) fatalError(s);
     FD_SET(cli->fd, &s->active_fds);
     if (cli->fd > s->max_fd)
         s->max_fd = cli->fd;
-    sprintf(buf, "server: client %d just arrived\n", cli->id);
-    sendNotification(s, fd, buf);
 }
 
 //Accepts a new connection, adds it to the linked list of clients and sends a notification to all clients about the new connection
@@ -572,6 +570,9 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
             log_warn("Invalid CHECK_RING command at node %d", s->localNode->id);
             pthread_mutex_unlock(&s->lock);
         }
+    }
+    else if (strcmp(cmd, "FINGER_TABLE_FALLBACK") == 0) {
+        send(cli->fd, "Node succesfully reached\n", 28, 0);
     }
     else {
         send(cli->fd, "ERROR Unknown command\n", 23, 0);

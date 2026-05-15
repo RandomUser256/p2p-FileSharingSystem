@@ -500,6 +500,11 @@ void nodePrint(Node* node) {
     } else {
         log_info("[INFO] Node Successor: NULL\n");
     }
+    if (node->predecessor != NULL) {
+        log_info("[INFO] Node Predecessor ID: %d %s\n", node->predecessor->id, node->predecessor->Ip);
+    } else {
+        log_info("[INFO] Node Predecessor: NULL\n");
+    }
     if (node->fileContentPath[0] != '\0') {
         log_info("[INFO] Node File Content Path: %s\n", node->fileContentPath);
     } else {
@@ -829,7 +834,7 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     int sock = init_socket(ip, port);
 
     if (sock < 0) {
-        log_warn("Invalid node accessed with remote_get_node()");
+        log_warn("Invalid node accessed with remote_get_node() ip %s", ip);
         return NULL;
     }
 
@@ -1198,7 +1203,7 @@ void remote_stabilize(t_server* s, int port) {
     Node* temp = remote_get_node(s, local_port, successor_ip);
 
     if (temp == NULL) { 
-        log_warn("[WARN] Could not get successor node info\n");
+        log_warn("[WARN] Could not get successor node info located in ip %s\n", successor_ip);
         return;
     }
 
