@@ -76,7 +76,7 @@ int main() {
     pthread_create(&server_tid, NULL, server_loop, serv);
 
     // Background service that maintains chord ring integrity
-    MaintenanceThread* mt = start_maintenance_thread(serv, 200, 800); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
+    MaintenanceThread* mt = start_maintenance_thread(serv, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
 
     printf("\n╔════════════════════════════════════════════════════════════╗\n");
     printf("║  Chord Node %d Started with Background Maintenance       ║\n", localNode->id);
