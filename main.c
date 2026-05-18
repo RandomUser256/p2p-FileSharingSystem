@@ -1,7 +1,11 @@
-#include <math.h>
-#include <time.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+
+
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
 
 #include "src/DHASH.h"
 #include "src/node.h"
@@ -13,7 +17,7 @@
 /*
 NOTE: Compile all source files together:
 
-gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c -o main -pthread -lm
+gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c src/sha1.c -o main -pthread -lm
 
 This compiles:
   - main.c (your program)
@@ -98,7 +102,6 @@ int main() {
         // Process the command
         if (strcmp(input, "n") == 0) {
             // Join a new node to the network
-
             printf("Enter IP of existing node to join: ");
 
             if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -169,10 +172,24 @@ int main() {
             set_log_level(get_log_level() == LOG_NONE ? LOG_WARN : LOG_NONE);
             printf("Error/warning logs %s\n", get_log_level() == LOG_NONE ? "disabled" : "enabled");
         }
+        else if (strcmp(input, "i") == 0) {
+            char filename[256];
+            printf("Enter filename: ");
+
+            if (fgets(filename, sizeof(filename), stdin)) {
+                // fgets keeps the newline character '\n', so we usually strip it:
+                filename[strcspn(filename, "\n")] = 0;
+            }
+
+            printf("Read file name\n");
+
+            insert(serv, filename);
+        }
         else {
             printf("Invalid command. Please try again.\n");
         }
     }
 
+    
     return 0;
 }

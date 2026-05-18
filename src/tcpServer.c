@@ -9,6 +9,7 @@ tutorial for code: https://medium.com/@oduwoledare/server-side-story-creating-a-
 #include "tcpServer.h"
 #include "logger.h"
 #include "node.h"
+#include "DHASH.h"
 
 void fatalError(t_server *s);
 void handle_command(t_server *s, t_client *cli, char *msg);
@@ -317,6 +318,25 @@ typedef struct {
     char      pred_ip[MAX_IP_LENGTH];
 } check_ring_task_t;
 
+typedef struct {
+    t_server *s;
+    int       fd;
+    char      filename[256];
+    long      filesize;
+} store_file_task_t;
+
+typedef struct {
+    t_server *s;
+    int       fd;
+    char      filename[256];
+} fetch_file_task_t;
+
+typedef struct {
+    t_server *s;
+    int       fd;
+    long      size;
+} update_registry_task_t;
+
 static void *notify_worker(void *arg) {
     notify_task_t *task = (notify_task_t *)arg;
     remote_notify(task->s, task->port, task->ip);
@@ -366,6 +386,144 @@ static void *check_ring_worker(void *arg) {
 
     freeNode(tempSucc);
     freeNode(tempPred);
+    free(task);
+    return NULL;
+}
+
+static void *store_file_worker(void *arg) {
+    store_file_task_t *task = (store_file_task_t *)arg;
+    int fd = task->fd;
+
+    pthread_mutex_lock(&task->s->lock);
+    char filepath[MAX_FILE_PATH_LENGTH + 256];
+    snprintf(filepath, sizeof(filepath), "%s/%s",
+             task->s->localNode->fileContentPath, task->filename);
+    pthread_mutex_unlock(&task->s->lock);
+
+    FILE *f = fopen(filepath, "wb");
+    if (!f) {
+        log_error("[STORE_FILE] cannot create %s", filepath);
+        send(fd, "ERROR Cannot create file\n", 25, 0);
+        close(fd);
+        free(task);
+        return NULL;
+    }
+
+    send(fd, "READY\n", 6, 0);
+
+    long received = 0;
+    char buf[4096];
+    while (received < task->filesize) {
+        long remaining = task->filesize - received;
+        int to_read = (remaining < (long)sizeof(buf)) ? (int)remaining : (int)sizeof(buf);
+        
+        //Stores line of text in 'buf' string, returns the amount of bytes received
+        int n = recv(fd, buf, to_read, 0);
+        if (n <= 0) break;
+
+        //Writes each byte individually to file 'f'
+        fwrite(buf, 1, n, f);
+        received += n;
+    }
+    fclose(f);
+
+    if (received == task->filesize) {
+        send(fd, "OK\n", 3, 0);
+        log_info("[STORE_FILE] saved %s (%ld bytes)", task->filename, task->filesize);
+    } else {
+        send(fd, "ERROR Incomplete transfer\n", 26, 0);
+        log_warn("[STORE_FILE] incomplete: got %ld of %ld bytes for %s",
+                 received, task->filesize, task->filename);
+        remove(filepath);
+    }
+
+    close(fd);
+    free(task);
+    return NULL;
+}
+
+/* Worker: send a local file to the requester.
+ * Protocol: FILE <size>\n  then raw bytes, then close. */
+static void *fetch_file_worker(void *arg) {
+    fetch_file_task_t *task = (fetch_file_task_t *)arg;
+    int fd = task->fd;
+
+    pthread_mutex_lock(&task->s->lock);
+    char filepath[MAX_FILE_PATH_LENGTH + 256];\
+
+    //Builds and stores directory for the target file
+    snprintf(filepath, sizeof(filepath), "%s/%s",
+             task->s->localNode->fileContentPath, task->filename);
+    pthread_mutex_unlock(&task->s->lock);
+
+    FILE *f = fopen(filepath, "rb");
+    if (!f) {
+        log_error("[FETCH_FILE] cannot open %s", filepath);
+        send(fd, "ERROR File not found\n", 21, 0);
+        close(fd);
+        free(task);
+        return NULL;
+    }
+    fseek(f, 0, SEEK_END);
+    long filesize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+
+    //Response header sent to node that initiated the fetch process 
+    char header[64];
+    snprintf(header, sizeof(header), "FILE %ld\n", filesize);
+    send(fd, header, strlen(header), 0);
+
+    //Sends contents of file
+    char buf[4096];
+    size_t rd;
+    while ((rd = fread(buf, 1, sizeof(buf), f)) > 0)
+        send(fd, buf, rd, 0);
+
+    fclose(f);
+    close(fd);
+    log_info("[FETCH_FILE] sent %s (%ld bytes)", task->filename, filesize);
+    free(task);
+    return NULL;
+}
+
+/* Worker: receive registry content and overwrite local REGISTRY_PATH. */
+static void *update_registry_worker(void *arg) {
+    update_registry_task_t *task = (update_registry_task_t *)arg;
+    int fd = task->fd;
+
+    FILE *f = fopen(REGISTRY_PATH, "wb");
+    if (!f) {
+        log_error("[UPDATE_REGISTRY] cannot open " REGISTRY_PATH);
+        send(fd, "ERROR Cannot write registry\n", 28, 0);
+        close(fd);
+        free(task);
+        return NULL;
+    }
+
+    send(fd, "READY\n", 6, 0);
+
+    long received = 0;
+    char buf[4096];
+    while (received < task->size) {
+        long remaining = task->size - received;
+        int to_read = (remaining < (long)sizeof(buf)) ? (int)remaining : (int)sizeof(buf);
+        int n = recv(fd, buf, to_read, 0);
+        if (n <= 0) break;
+        fwrite(buf, 1, n, f);
+        received += n;
+    }
+    fclose(f);
+
+    if (received == task->size) {
+        send(fd, "OK\n", 3, 0);
+        log_info("[UPDATE_REGISTRY] registry updated (%ld bytes)", task->size);
+    } else {
+        send(fd, "ERROR Incomplete\n", 17, 0);
+        log_warn("[UPDATE_REGISTRY] incomplete: got %ld of %ld bytes",
+                 received, task->size);
+    }
+
+    close(fd);
     free(task);
     return NULL;
 }
@@ -574,6 +732,89 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
     else if (strcmp(cmd, "FINGER_TABLE_FALLBACK") == 0) {
         send(cli->fd, "Node succesfully reached\n", 28, 0);
     }
+
+    // --------------------
+    // STORE_FILE
+    // --------------------
+    else if (strcmp(cmd, "STORE_FILE") == 0) {
+        char filename[256];
+        long filesize;
+        if (sscanf(msg, "STORE_FILE %255s %ld", filename, &filesize) == 2 && filesize >= 0) {
+            store_file_task_t *task = malloc(sizeof(store_file_task_t));
+            if (!task) {
+                send(cli->fd, "ERROR Out of memory\n", 20, 0);
+                return;
+            }
+            task->s        = s;
+            task->fd       = cli->fd;
+            task->filesize = filesize;
+            strncpy(task->filename, filename, sizeof(task->filename) - 1);
+            task->filename[sizeof(task->filename) - 1] = '\0';
+
+            // Hand the fd to the worker — remove it from the server's select() set
+            // so the server loop does not race with the worker's recv() calls.
+            FD_CLR(cli->fd, &s->active_fds);
+            cli->fd  = -1;   // freeClient checks > 0 before closing, so this is safe
+            cli->msg = NULL;  // worker owns nothing from the buffer; exit sendMessage loop
+
+            spawn_detached(store_file_worker, task);
+        } else {
+            send(cli->fd, "ERROR Invalid STORE_FILE\n", 25, 0);
+        }
+    }
+
+    // --------------------
+    // FETCH_FILE
+    // --------------------
+    else if (strcmp(cmd, "FETCH_FILE") == 0) {
+        char filename[256];
+        if (sscanf(msg, "FETCH_FILE %255s", filename) == 1) {
+            fetch_file_task_t *task = malloc(sizeof(fetch_file_task_t));
+            if (!task) {
+                send(cli->fd, "ERROR Out of memory\n", 20, 0);
+                return;
+            }
+            task->s  = s;
+            task->fd = cli->fd;
+            strncpy(task->filename, filename, sizeof(task->filename) - 1);
+            task->filename[sizeof(task->filename) - 1] = '\0';
+
+            //Removes client from system bitmask set, avoids race conditions between worker and main thread
+            FD_CLR(cli->fd, &s->active_fds);
+            cli->fd  = -1;
+            cli->msg = NULL;
+
+            spawn_detached(fetch_file_worker, task);
+        } else {
+            send(cli->fd, "ERROR Invalid FETCH_FILE\n", 25, 0);
+        }
+    }
+
+    // --------------------
+    // UPDATE_REGISTRY
+    // --------------------
+    else if (strcmp(cmd, "UPDATE_REGISTRY") == 0) {
+        long size;
+        if (sscanf(msg, "UPDATE_REGISTRY %ld", &size) == 1 && size >= 0) {
+            update_registry_task_t *task = malloc(sizeof(update_registry_task_t));
+            if (!task) {
+                send(cli->fd, "ERROR Out of memory\n", 20, 0);
+                return;
+            }
+            task->s    = s;
+            task->fd   = cli->fd;
+            task->size = size;
+
+            FD_CLR(cli->fd, &s->active_fds);
+            cli->fd  = -1;
+            cli->msg = NULL;
+
+            spawn_detached(update_registry_worker, task);
+        } else {
+            send(cli->fd, "ERROR Invalid UPDATE_REGISTRY\n", 30, 0);
+        }
+    }
+
     else {
         send(cli->fd, "ERROR Unknown command\n", 23, 0);
     }
