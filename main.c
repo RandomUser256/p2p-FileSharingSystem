@@ -183,7 +183,10 @@ int main() {
 
             printf("Read file name\n");
 
-            insert(serv, filename);
+            char filePath[512] = {0}; 
+            snprintf(filePath, sizeof(filePath), "shared/files/%s", filename);
+
+            insert_chunked(serv, filePath);
         }
         else {
             printf("Invalid command. Please try again.\n");

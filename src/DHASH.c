@@ -16,8 +16,8 @@
 #include <unistd.h>
 
 /*
-Pending changes:
-    
+Notes:
+    - Problems with split files, only saw first chunk be shared.
 */
 
 char* toUpper_hexadecimal(const char* hexadecimal) {
@@ -757,7 +757,6 @@ int insert_chunked(t_server* s, const char* filepath) {
     strncpy(entry.original_name, basename, sizeof(entry.original_name) - 1);
     entry.chunk_count = chunk_count;
 
-    //Initializes values in every ChunkEntry
     for (int i=0; i< chunk_count; i++) {
         ChunkEntry *ce = &entry.chunks[i];
         strncpy(ce->name, chunk_names[i], sizeof(ce->name) - 1);
