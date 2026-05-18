@@ -188,6 +188,23 @@ int main() {
 
             insert_chunked(serv, filePath);
         }
+        else if (strcmp(input, "r") == 0) {
+            char filename[256];
+            printf("Enter filename to retrieve: ");
+
+            if (fgets(filename, sizeof(filename), stdin)) {
+                // fgets keeps the newline character '\n', so we usually strip it:
+                filename[strcspn(filename, "\n")] = 0;
+            }
+
+            printf("Read file name: %s\n", filename);
+
+            /*
+            char filePath[512] = {0}; 
+            snprintf(filePath, sizeof(filePath), "shared/files/%s", filename);
+            */
+            retrieve_file(serv, filename , "shared/files");
+        }
         else {
             printf("Invalid command. Please try again.\n");
         }

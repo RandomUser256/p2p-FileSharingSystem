@@ -393,6 +393,7 @@ static int parse_registry_line(const char * line, FileEntry* entry) {
     const char *comma = strchr(line, ',');
     //Skips if line if it does not contain a comma, means its either empty or does not have a filename
     if (!comma) return 0;
+    //Distancia entre inicio de linea y la coma
     size_t nlen = (size_t)(comma - line);
     //Invalid comma positions, either no filename or it chekcs if the entire line is only filename+comma
     if (nlen == 0 || nlen >= sizeof(entry->original_name)) return 0;
@@ -402,7 +403,7 @@ static int parse_registry_line(const char * line, FileEntry* entry) {
 
     const char *p = comma + 1;
     while (*p) {
-        while (*p == ' ') p++;
+        while (*p == ',') p++;
         if (!*p) break;
 
         /* a chunk token ends at the ']' closing the IP list;
@@ -432,7 +433,7 @@ int load_registry(FileEntry* entries, int max_entries, int *out_count) {
 
     FILE *f = fopen(REGISTRY_PATH, "r");
     if (!f) {
-        log_error("[LOAD_REGISTRY] unable to open %s", REGISTRY_PATH);
+        printf("[LOAD_REGISTRY] unable to open %s", REGISTRY_PATH);
         return -1;
     }
     
@@ -448,19 +449,21 @@ int load_registry(FileEntry* entries, int max_entries, int *out_count) {
         }
     }
     fclose(f);
+
+
     return 0;
 }
 
 int save_registry(const FileEntry * entries, int count) {
     FILE *f = fopen(REGISTRY_PATH, "w");
     if (!f) {
-        log_error("[SAVE_REGISTRY] unable to open %s", REGISTRY_PATH);
+        printf("[SAVE_REGISTRY] unable to open %s", REGISTRY_PATH);
         return -1;
     }
 
     fprintf(f, "# File directory registry\n\n");
     for (int i=0; i < count; i++) {
-        fprintf(f, "%s", entries[i].original_name);
+        fprintf(f, "%s,", entries[i].original_name);
         for (int j=0; j<entries[i].chunk_count; j++) {
             const ChunkEntry *c = &entries[i].chunks[j];
 
@@ -536,7 +539,7 @@ static int split_file(const char* filepath, int num_parts, char chunk_names[][25
     snprintf(cmd, sizeof(cmd),
              "bash File_utilities/splitter.sh \"%s\" %d", filepath, num_parts);
     if (system(cmd) != 0) {
-        log_error("[split_file] splitter.sh failed for %s", filepath);
+        printf("[split_file] splitter.sh failed for %s", filepath);
         return -1;
     }
     return derive_chunk_names(filepath, num_parts, chunk_names, chunk_count);
@@ -550,7 +553,7 @@ Protocol:
 int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, const char* storage_directory) {
     int sock = init_socket(sourceIp, port);
     if (sock < 0)  {
-        log_error("[FETCH_FILE] Could not establish connection with %s:%s", sourceIp, port);
+        printf("[FETCH_FILE] Could not establish connection with %s:%d", sourceIp, port);
         return -1;
     }
 
@@ -580,8 +583,9 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
         pos++;
     }
 
-    if (strncmp(response, "ERROR", 5) != 0) {
-        log_error("[FETCH_FILE] file not found in remote node %s:%d", sourceIp, port);
+    if (strncmp(response, "ERROR", 5) == 0) {
+        printf("%s\n", response);
+        printf("[FETCH_FILE] file not found in remote node %s:%d\n", sourceIp, port);
         close(sock);
         return -1;
     }
@@ -589,7 +593,7 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
     //Verify integrity of file size indicator Header
     long filesize = 0;
     if (sscanf(response, "FILE %ld", &filesize) != 1 || filesize < 0) {
-        log_error("[FETCH_FILE] Bad header received from %s:%d", sourceIp, port);
+        printf("[FETCH_FILE] Bad header received from %s:%d\n", sourceIp, port);
         close(sock);
         return -1;
     }
@@ -613,7 +617,7 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
     close(sock);
 
     if (received != filesize) {
-        log_warn("[FETCH_FILE] incomplete file: got %ld of %ld bytes for %s", received, filesize, source_filename);
+        printf("[FETCH_FILE] incomplete file: got %ld of %ld bytes for %s", received, filesize, source_filename);
         return -1;
     }
 
@@ -736,6 +740,8 @@ int insert_chunked(t_server* s, const char* filepath) {
         log_error("[INSERT_CHUNKED] Failed to split file %s", filepath);
     }
 
+    printf("Chunk count: %d\n", chunk_count);
+
     pthread_mutex_lock(&s->lock);
     int port = s->port;
     pthread_mutex_unlock(&s->lock);
@@ -765,6 +771,8 @@ int insert_chunked(t_server* s, const char* filepath) {
         // Formula for obtaining Chord ring from hash: SHA1(name) mod (2^n)
         int base_id = hash_file_node(chunk_names[i]) % (int)MAX_NUMBER_NODES;
 
+        printf("Base id %d for chunk %s\n", base_id, chunk_names[i]);
+
         char prev_ip[MAX_IP_LENGTH] = {0};
 
         for (int r=0; r<DHASH_REPLICA_COUNT; r++) {
@@ -787,28 +795,33 @@ int insert_chunked(t_server* s, const char* filepath) {
             }
 
             char chunk_path[512];
-            snprintf(chunk_path, sizeof(chunk_path), "%s%s", directory_prefix, chunk_names[i]);
+            snprintf(chunk_path, sizeof(chunk_path), "%s/%s", directory_prefix, chunk_names[i]);
 
             if (tcp_send_file(port, destination->Ip, chunk_names[i], chunk_path) == 0) {
                 ce->node_ids[ce->replica_count] = destination->id;
                 strncpy(ce->node_ips[ce->replica_count], destination->Ip, MAX_IP_LENGTH - 1);
                 ce->replica_count++;
+                
                 strncpy(prev_ip, destination->Ip, MAX_IP_LENGTH - 1);
+
+                //entry.chunks[ce->replica_count] = *ce;
+
+                printf("File %s inserted successfully at node ID: %d IP: %s\n",  chunk_names[i], destination->id, destination->Ip);
             }
 
             freeNode(destination);
         }
-
-        //Update registry file
-        FileEntry registry[MAX_REGISTRY_ENTRIES];
-        int registry_count = 0;
-        load_registry(registry, MAX_REGISTRY_ENTRIES, &registry_count);
-        upsert_file_entry(registry, &registry_count, MAX_REGISTRY_ENTRIES, &entry);
-        save_registry(registry, registry_count);
-        broadcast_registry(s, port);
-
-        return 0;
     }
+
+    //Update registry file
+    FileEntry registry[MAX_REGISTRY_ENTRIES];
+    int registry_count = 0;
+    load_registry(registry, MAX_REGISTRY_ENTRIES, &registry_count);
+    upsert_file_entry(registry, &registry_count, MAX_REGISTRY_ENTRIES, &entry);
+    save_registry(registry, registry_count);
+    broadcast_registry(s, port);
+
+    return 0;
 }
 
 int retrieve_file(t_server *s, const char* original_filename, const char* output_dir) {
@@ -819,7 +832,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
     FileEntry registry[MAX_REGISTRY_ENTRIES];
     int reg_count = 0;
     if (load_registry(registry, MAX_REGISTRY_ENTRIES, &reg_count) != 0) {
-        log_error("[retrieve_file] could not load registry");
+        printf("[retrieve_file] could not load registry");
         return -1;
     }
 
@@ -833,7 +846,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
     }
 
     if (!entry) {
-        log_error("[retrieve_file] %s not found in registry", original_filename);
+        printf("[retrieve_file] %s not found in registry", original_filename);
         return -1;
     }
 
@@ -867,12 +880,12 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
             if (tcp_fetch_file(port, c->node_ips[j], c->name, destination_path) == 0) {
                 fetched = 1;
             } else {
-                log_warn("[RETRIEVE_FILE] Unable to retrieve chunk %s replica %d %s", c->name, j, c->node_ids);
+                printf("[RETRIEVE_FILE] Unable to retrieve chunk %s replica %d %ls\n", c->name, j, c->node_ids);
             }
         }
 
         if (!fetched) {
-            log_error("[RETRIEVE_FILE] All replicated copies failed for chunk %s", c->name);
+            printf("[RETRIEVE_FILE] All replicated copies failed for chunk %s\n", c->name);
             return -1;
         }
     }
@@ -888,7 +901,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
     snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " > \"%s\"", out_path);
 
     if (system(cat_cmd) != 0) {
-        log_error("[RETRIEVE_FILE] Concatenation failed");
+        printf("[RETRIEVE_FILE] Concatenation failed");
         return -1;
     }
 
@@ -897,6 +910,6 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
     snprintf(rm_cmd, sizeof(rm_cmd), "rm -rf \"%s\"", tmpdir);
     system(rm_cmd);
 
-    log_info("[retrieve_file] %s reconstructed at %s", original_filename, out_path);
+    printf("[retrieve_file] %s reconstructed at %s", original_filename, out_path);
     return 0;
 }
