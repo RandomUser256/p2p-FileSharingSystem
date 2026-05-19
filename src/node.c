@@ -318,20 +318,28 @@ Node* init_finger_table(Node* existingNode, Node* newNode) {
         return NULL;
     }
 
-    newNode->fingerTable[0].successor = find_successor(existingNode, newNode->fingerTable[0].start); // Initialize the second entry in the finger table based on the existing node's information
+    newNode->fingerTable[0].successor = find_successor(existingNode, newNode->fingerTable[0].start); // Initialize the first entry in the finger table using the existing node's ring knowledge
 
-    newNode->predecessor = newNode->fingerTable[0].successor->predecessor; // Set the predecessor of the existing node to the predecessor of its successor
-
-    newNode->fingerTable[0].successor->predecessor = newNode; // Update the predecessor of the existing node's successor to point to the existing node
+    newNode->predecessor = newNode->fingerTable[0].successor->predecessor; // New node's predecessor is whoever was before its successor
+    newNode->fingerTable[0].successor->predecessor = newNode;              // Fix: use fingerTable[0].successor, not the stale newNode->successor
+    newNode->successor = newNode->fingerTable[0].successor;                // Sync successor pointer
 
     //Initialize the finger table of the new node based on an existing node in the network
-    for (size_t i = 2; i <= NODE_ID_LENGTH; i++)
+    for (size_t i = 0; i < (NODE_ID_LENGTH-1); i++)  // Fix: was NODE_ID_LENGTH-2, skipped last entry
     {
-        if (in_open_interval(newNode->fingerTable[i].start, newNode->id, newNode->fingerTable[i-1].successor->id)) {
-            newNode->fingerTable[i-1] = *createFingerTableEntry(i, newNode, newNode->fingerTable[i-1].successor); // If the start of the interval for the current entry in the existing node's finger table falls within a certain range, copy that entry to the new node's finger table
+        if (in_open_interval(newNode->fingerTable[i+1].start, newNode->id, newNode->fingerTable[i].successor->id)) {
+            newNode->fingerTable[i+1].successor = newNode->fingerTable[i].successor; // Reuse already-found successor
+            strncpy(newNode->fingerTable[i+1].Ip, newNode->fingerTable[i].Ip, MAX_IP_LENGTH - 1);
+            newNode->fingerTable[i+1].Ip[MAX_IP_LENGTH - 1] = '\0';
         }
         else {
-            existingNode->fingerTable[i-1] = *createFingerTableEntry(i, newNode, find_successor(newNode, newNode->fingerTable[i-2].start)); // Otherwise, create a new entry in the new node's finger table based on the existing node's information
+            // Fix: was writing to existingNode and calling find_successor(newNode,...) — both wrong.
+            // Must write to newNode and search from existingNode (which knows the ring).
+            newNode->fingerTable[i+1].successor = find_successor(existingNode, newNode->fingerTable[i+1].start);
+            if (newNode->fingerTable[i+1].successor != NULL) {
+                strncpy(newNode->fingerTable[i+1].Ip, newNode->fingerTable[i+1].successor->Ip, MAX_IP_LENGTH - 1);
+                newNode->fingerTable[i+1].Ip[MAX_IP_LENGTH - 1] = '\0';
+            }
         }
     }
     return newNode; // Return the initialized node with its finger table set up
@@ -455,7 +463,7 @@ void stabilize(Node* node) {
 
 /* --------------------------------
 * Troublshooting functions for centralized Chord algorithm implementations
-*/ --------------------------------
+ -------------------------------- */
 
 //Prints information of current node
 void nodePrint(Node* node) {
