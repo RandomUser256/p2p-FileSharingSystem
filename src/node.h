@@ -39,10 +39,7 @@ typedef struct Node {
     struct FingerTableEntry fingerTable[NODE_ID_LENGTH];
 } Node;
 
-bool nullCheckNode(Node* node);
-bool nullCheckFingerTable(FingerTableEntry* entry);
 FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Node* successor);
-void updateValuesFingerTable(Node* node);
 
 Node* createNode(int id, const char* ip, const char* fileContentPath);
 void saveFingerTableToFile(Node* node, const char* filepath);

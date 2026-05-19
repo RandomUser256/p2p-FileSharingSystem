@@ -23,7 +23,6 @@
 
 /*
 TODO:
-    - Implement correct hashing of file identifiers
 */
 
 /*
@@ -54,19 +53,6 @@ int half_right_open_interval(int id, int start, int end) {
         return id >= start || id < end; // wraparound
 }
 
-//Helper functions for checking for null objects
-bool nullCheckNode(Node* node) {
-    if (node) {
-        return true;
-    }
-    return false;
-}
-
-bool nullCheckFingerTable(FingerTableEntry* entry) {
-    return nullCheckNode(entry->successor);
-}
-
-
 //Initializes a single FingerTableEntry for a table from the parent_node
 FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Node* successor) {
     FingerTableEntry* entry = malloc(sizeof(FingerTableEntry));
@@ -94,26 +80,6 @@ FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Nod
     }
     
     return entry;
-}
-
-
-void updateValuesFingerTable(Node* node) {
-    for (int i = 1; i <= NODE_ID_LENGTH; i++) {
-        node->fingerTable[i-1].start =
-            (node->id + (1U << (i-1))) % MAX_NUMBER_NODES;
-
-        node->fingerTable[i-1].lowerIntervalLimit = node->fingerTable[i-1].start;
-
-        if (i < NODE_ID_LENGTH - 1) {
-            node->fingerTable[i-1].upperIntervalLimit = node->fingerTable[i].start;
-        } else {
-            node->fingerTable[i-1].upperIntervalLimit = node->fingerTable[0].start; // Wrap around for the last entry
-        }
-
-        node->fingerTable[i-1].successor = node;
-
-        node->fingerTable[i-1].Ip[0] = '\0';
-    }
 }
 
 //Forward declarations
@@ -252,7 +218,7 @@ Node* createNode(int id, const char* ip, const char* fileContentPath) {
     return newNode;
 }
 
-
+//Obtains closest active node that precedes the given node
 Node* closest_preceding_finger(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -306,12 +272,14 @@ Node* copyNode(Node* node) {
     return copy;
 }
 
+//Free dynamically allocated node structures
 void freeNode(Node* node) {
     if (node != NULL) {
         free(node);
     }
 }
 
+//Chord function for finding predecessor of a given node, starting from any other node
 Node* find_predecessor(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -319,6 +287,7 @@ Node* find_predecessor(Node* node, int targetId) {
 
     Node* n = node;
 
+    //Loops until the target id is in the range of given node and its successor
     while (!half_left_open_interval(targetId, n->id, n->successor->id)) {
         Node* next = closest_preceding_finger(n, targetId);
 
@@ -330,6 +299,7 @@ Node* find_predecessor(Node* node, int targetId) {
     return n;
 }
 
+//Chord function for finding successor of a given node, starting from any other node
 Node* find_successor(Node* node, int targetId) {
     if (!node) {
         return NULL;
@@ -404,7 +374,7 @@ void update_others(Node* currentNode) {
     }
 } 
 
-//Second version of Chrod algorithm join, supports concurrent node joins
+//Second version of Chord algorithm join, supports concurrent node joins
 void join(Node* existingNode, Node* newNode) {
     if (!newNode) {
         return;
@@ -449,8 +419,7 @@ void fix_fingers(Node* node) {
     saveFingerTableToFile(node, "nodeInfo/FingerTable");
 }
     
-//Second version of notify, supports concurrent node joins
-//Now saves changes to disk for persistence
+//Checks if a given node has become the new predecessor of an existing node, updates the old nodes pointers
 void notify(Node* node, Node* potentialPredecessor) {
     if (!node || !potentialPredecessor) {
         return;
@@ -466,8 +435,7 @@ void notify(Node* node, Node* potentialPredecessor) {
     }
 }
 
-//Second version of stabilize, supports concurrent node joins
-//Now saves changes to disk for persistence
+//Verifies correctness of a nodes succesor
 void stabilize(Node* node) {
     if (!node || !node->successor) {
         return;
@@ -485,7 +453,9 @@ void stabilize(Node* node) {
     notify(node->successor, node); // Notify the successor about the current node as a potential predecessor
 }
 
-//Troublshooting functions
+/* --------------------------------
+* Troublshooting functions for centralized Chord algorithm implementations
+*/ --------------------------------
 
 //Prints information of current node
 void nodePrint(Node* node) {
@@ -548,48 +518,11 @@ void check_ring(Node* start) {
     } while (curr != start);
 }
 
-/*
-void remote_check_ring(Node* start, const char* ip) {
-    Node* ringChecker = start;
-
-    //  "Ring check passed for node %d at IP %s\n", node->id, node->Ip);
-    do {
-        Node* succPred = remote_closest_preceding_finger(ringChecker->Ip, ringChecker->successor->id); // Get the closest preceding finger for the current node to check the ring structure
-        Node* predSucc = remote_find_successor(ringChecker->Ip, ringChecker->predecessor->id); // Get the successor of the predecessor of the current node to check the ring structure
-
-        if ( succPred != ringChecker) {
-            log_error("ERROR: successor->predecessor mismatch at node %d\n", ringChecker->id);
-            return;
-        }
-        if ( predSucc != ringChecker) {
-            log_error("ERROR: predecessor->successor mismatch at node %d\n", ringChecker->id);
-            return;
-        }
-
-        printf("[INFO] Ring check passed for node %d %s\n", ringChecker->id, ringChecker->Ip);
-
-        ringChecker = remote_find_successor(ringChecker->Ip, ringChecker->successor->id); // Move to the next node in the ring using the successor's IP address
-    }
-    while (ringChecker != start); // Loop until we have checked the entire ring
-}
-*/
-
-//Not in use currently
-void executeSSH(const char* ip, const char* command) {
-    char fullCommand[512];
-
-    sprintf(fullCommand, "ssh %s \"%s\"", ip, command);
-
-    log_info("[INFO] SSH EXEC: %s\n", fullCommand);
-
-    system(fullCommand);
-}
 
 /*
    FINGER TABLE PERSISTENCE 
    - Save/load finger table to/from disk
 */
-
 //Saves current state of finger table to local FingerTable file
 void saveFingerTableToFile(Node* node, const char* filepath) {
     if (!node) {
@@ -603,6 +536,7 @@ void saveFingerTableToFile(Node* node, const char* filepath) {
         return;
     }
 
+    //File header
     fprintf(file, "# Finger Table for Node %d\n", node->id);
     fprintf(file, "# Format: entry=<idx>,start=<start>,lower=<lower>,upper=<upper>,successor_id=<id>,successor_ip=<ip>\n\n");
 
@@ -727,17 +661,18 @@ void printFingerTable(Node* node) {
 
 /* ======================================================================
    Chord functions for remote communication 
-   -
    ====================================================================== */
 
+//Initiates socket connection between server and client
 int init_socket(const char* ip, int port) {
+    //Creates IPv4 (AF_INET) TCP socket
     int sock = socket(AF_INET, SOCK_STREAM, 0);
     if (sock < 0) {
         log_error("socket: %s", strerror(errno));
         return -1;
     }
 
-    // Set non-blocking
+    // Set non-blocking communication to implement custom timeout
     int flags = fcntl(sock, F_GETFL, 0);
     if (flags < 0) {
         log_error("fcntl F_GETFL: %s", strerror(errno));
@@ -745,6 +680,7 @@ int init_socket(const char* ip, int port) {
         return -1;
     }
 
+    //O_NONBLOCK indicates that if connect() takes to long, return immediately
     if (fcntl(sock, F_SETFL, flags | O_NONBLOCK) < 0) {
         log_error("fcntl F_SETFL: %s", strerror(errno));
         close(sock);
@@ -761,6 +697,7 @@ int init_socket(const char* ip, int port) {
         return -1;
     }
 
+    //Tries connect(), immediately returns with error due to non-blocking state
     int res = connect(sock, (struct sockaddr*)&addr, sizeof(addr));
 
     if (res < 0) {
@@ -779,6 +716,7 @@ int init_socket(const char* ip, int port) {
         tv.tv_sec = 3;
         tv.tv_usec = 0;
 
+        //Waits for three seconds before timeout
         res = select(sock + 1, NULL, &wfds, NULL, &tv);
 
         if (res == 0) {
@@ -814,7 +752,7 @@ int init_socket(const char* ip, int port) {
         log_warn("failed to restore blocking mode");
     }
 
-    // (optional) keep your send/recv timeouts
+    // send/recv process timeouts of 3 seconds to avoid indefinite waits
     struct timeval tv;
     tv.tv_sec = 3;
     tv.tv_usec = 0;
@@ -828,6 +766,7 @@ int init_socket(const char* ip, int port) {
 Node* remote_get_node(t_server* s, int port, const char* ip) {
     // Avoid TCP self-connection deadlock: serve the request locally
     pthread_mutex_lock(&s->lock);
+    //If searched node is the same as local node
     if (s->localNode && strcmp(ip, s->localNode->Ip) == 0) {
         Node* copy = copyNode(s->localNode);
         pthread_mutex_unlock(&s->lock);
@@ -842,7 +781,7 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
         return NULL;
     }
 
-    //  Send request
+    //  Send request for retrieven node data
     char request[64];
     snprintf(request, sizeof(request), "GET_NODE\n");
 
@@ -859,6 +798,7 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
 
     //Extract response from server
     while (total < sizeof(response) - 1) {
+        //Stores received data in 'response' and tracks amount of bytes written to the buffer
         n = recv(sock, response + total, sizeof(response) - total - 1, 0);
 
         if (n < 0) {
@@ -872,12 +812,14 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
             break; 
         }
 
+        //Updates starting position for writing to buffer
         total += n;
         response[total] = '\0';
 
         if (strchr(response, '\n')) break; // end of message
     }
 
+    //If no data was written
     if (total == 0) {
         //perror("recv");
         log_error("Failed to receive response from node at IP %s", ip);
@@ -885,6 +827,7 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
         return NULL;
     }
 
+    //Null terminator for string
     response[total] = '\0';
 
     int node_id;
@@ -912,9 +855,9 @@ Node* remote_get_node(t_server* s, int port, const char* ip) {
     return temp;
 }
 
-//Call from tcpServer
+//Distributed implementation of Chord algorithm find_predecessor()
 Node* remote_find_predecessor(t_server* s, int port, int targetId) {
-    // Get a snapshot of the local node info while holding the lock to avoid race conditions
+    // Get a copy of the local node while holding the lock to avoid race conditions
     pthread_mutex_lock(&s->lock);
     Node* predecessor = copyNode(s->localNode);
     int localNodeId = s->localNode->id;
@@ -923,12 +866,15 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
     localNodeIp[sizeof(localNodeIp) - 1] = '\0';
     pthread_mutex_unlock(&s->lock);
 
+    //Avoids cicling ring structure more than once
     int max_iters = MAX_NUMBER_NODES + 1;
+
     while (!half_left_open_interval(targetId, predecessor->id, predecessor->successor->id)) {
         if (--max_iters < 0) {
             log_warn("remote_find_predecessor: iteration limit reached for target %d", targetId);
             break;
         }
+        //Checks loop condition where node's predecessor points to itself
         if (strcmp(localNodeIp, predecessor->Ip) == 0) {
             pthread_mutex_lock(&s->lock);
             Node* cpf = closest_preceding_finger(s->localNode, targetId);
@@ -973,6 +919,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
                 n = recv(sock, response + total, sizeof(response) - total - 1, 0);
                 if (n <= 0) break;
 
+                //Tracks position for writing to buffer
                 total += n;
                 response[total] = '\0';
 
@@ -991,6 +938,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
             int node_id;
             char node_ip[64];
 
+            //Parse information into node structures
             if (sscanf(response, "NODE %d %63s", &node_id, node_ip) == 2) {
                 freeNode(predecessor);
                 Node* tmpNode = createNode(node_id, node_ip, "shared/files");
@@ -1016,6 +964,7 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
     return predecessor;
 }
 
+//Distributed implementation of Chord algorithm find_successor()
 Node* remote_find_successor(t_server* s, int port, int targetId) {
     Node* temp = remote_find_predecessor(s, port, targetId);
 
@@ -1040,55 +989,22 @@ Node* remote_find_successor(t_server* s, int port, int targetId) {
     return succ;
 }
 
-/*
-//Remotely updates ring structure to include new node. Has to be called by new node wanting to join the network
-//Must know beforehand the IP of an existing node in the network to perform the join operation
-void remote_join(const char* existingNodeIp, const char* existingNodeUser, Node* newNode) {
-    if (!newNode) {
-        return;
-    }
-
-    Node* remoteSuccessor = remote_find_successor(existingNodeIp, newNode->id); // Find the successor of the new node using the existing node as a reference point through remote communication
-
-    newNode->successor = remoteSuccessor; // Update the successor of the new node to point to the successor obtained through remote communication
-    newNode->predecessor = remoteSuccessor->predecessor; // Update the predecessor of the new node to point to the predecessor of the successor obtained through remote communication
-
-    if (remoteSuccessor->predecessor != NULL) {
-        remoteSuccessor->predecessor->successor = newNode; // Update the successor of the predecessor of the successor obtained through remote communication to point to the new node
-    }
-
-    remoteSuccessor->predecessor = newNode; // Update the predecessor of the successor obtained through remote communication to point to the new node
-
-    char command[256];
-    snprintf(command, sizeof(command),
-         "ssh %s@%s \"cd /home/mmagallanes && ./scripts/node_comms join %d %s\" 2>/dev/null",
-         existingNodeUser,
-         existingNodeIp,
-         newNode->id,
-         newNode->Ip);
-
-    int result = system(command); // Execute the command to perform the join operation on the remote node
-
-    if (result != 0) {
-        printf("Error performing remote join\n");
-    } 
-}
-    */
-
+//Distributed implementation of Chord algorithm join()
 void remote_join(const char* existingIp, int port, t_server* s) {
+    //Copy relevant node information
     pthread_mutex_lock(&s->lock);
     s->localNode->predecessor = NULL;
     int local_id = s->localNode->id;
     pthread_mutex_unlock(&s->lock);
 
-    // Ask the entry-point node directly for our successor instead of
-    // starting the traversal from our own self-pointing ring.
     int sock = init_socket(existingIp, port);
     if (sock < 0) {
         return;
     }
 
     char request[64];
+
+    //Asks for successor of node where we join from, will be assigned as this nodes successor
     snprintf(request, sizeof(request), "FIND_SUCCESSOR %d\n", local_id);
     if (send(sock, request, strlen(request), 0) < 0) {
         perror("send");
@@ -1109,6 +1025,8 @@ void remote_join(const char* existingIp, int port, t_server* s) {
 
     int succ_id;
     char succ_ip[64];
+
+    //Verify that ID and IP from successor node is recovered
     if (sscanf(response, "NODE %d %63s", &succ_id, succ_ip) == 2) {
         Node* tempSucc = createNode(succ_id, succ_ip, "shared/files");
         pthread_mutex_lock(&s->lock);
@@ -1128,8 +1046,10 @@ void remote_join(const char* existingIp, int port, t_server* s) {
         strncpy(s->localNode->fingerTable[0].Ip, succ_ip, MAX_IP_LENGTH - 1);
         s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
 
+        //Persist changes to disk
         saveNodeToFile(s->localNode, "nodeInfo/Node");
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+
         pthread_mutex_unlock(&s->lock);
         log_info("remote_join: joined ring, successor is node %d %s", succ_id, succ_ip);
     } else {
@@ -1137,14 +1057,16 @@ void remote_join(const char* existingIp, int port, t_server* s) {
     }
 }
 
-
+//Distributed implementation of Chord algorithm notify()
 void remote_notify(t_server* s, int port, const char* existingIp) {
+    //Copy relevant node information
     pthread_mutex_lock(&s->lock);
     if (s->localNode == NULL) {
         pthread_mutex_unlock(&s->lock);
         log_error("In remote_notify() Local node is NULL");
         return;
     }
+
     int local_id = s->localNode->id;
     char local_ip[64];
     strncpy(local_ip, s->localNode->Ip, sizeof(local_ip) - 1);
@@ -1186,10 +1108,15 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
     log_info("Succesfull notify process completed at node %d %s", local_id, local_ip);
 }
 
+//Fixes successor pointer of a node adjacent to another node that failed or shutdown
+//Grabs first valid node as succesor
 Node* finger_table_fallback(t_server* s, int port) {
+    //Cicles every finger table entry 
     for (int i = 0; i < NODE_ID_LENGTH; i++) {
+
         pthread_mutex_lock(&s->lock);                                                                                                                                                                                       
         Node* finger = s->localNode->fingerTable[i].successor;
+        //Passes table entries that point to self, not useful for updating successor
         if (finger == NULL || finger == s->localNode || finger->id == s->localNode->id) {
             pthread_mutex_unlock(&s->lock);
             continue;
@@ -1202,6 +1129,7 @@ Node* finger_table_fallback(t_server* s, int port) {
                                                                                                                                                                                              
         pthread_mutex_unlock(&s->lock);
 
+        //Checks for empty or invalid IP
         if (finger_ip[0] == '\0') continue;
 
         int sock = init_socket(finger_ip, port);                                                                                                                                                                            
@@ -1211,11 +1139,12 @@ Node* finger_table_fallback(t_server* s, int port) {
         }                                                                                                                                                                                                                   
         close(sock);
 
+        //Gets copy of possible successor
         Node* candidate = remote_get_node(s, port, finger_ip);                                                                                                                                                              
         if (candidate == NULL) continue;
 
         pthread_mutex_lock(&s->lock);  
-
+        //Checks that previously registered succesor is valid, free node if necessary
         Node* old_succ = s->localNode->successor;                                                                                                                                                                           
         if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);                                                                                                                                               
         s->localNode->successor = candidate;
@@ -1225,6 +1154,7 @@ Node* finger_table_fallback(t_server* s, int port) {
         strncpy(s->localNode->fingerTable[0].Ip, candidate->Ip, MAX_IP_LENGTH - 1);
         s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
         
+        //Persist changes to disk
         saveNodeToFile(s->localNode, "nodeInfo/Node");                                                                                                                                                                      
         saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");   
 
@@ -1232,6 +1162,7 @@ Node* finger_table_fallback(t_server* s, int port) {
                                                                                                                                                                                                                             
         log_info("finger_table_fallback: promoted finger %d (%s) as new successor", candidate->id, candidate->Ip);
         Node* ret = copyNode(candidate);
+
         // Null out predecessor so remote_stabilize's in_open_interval check cannot
         // immediately override the just-installed successor with a stale remote value.
         if (ret != NULL) { freeNode(ret->predecessor); ret->predecessor = NULL; }
@@ -1242,6 +1173,7 @@ Node* finger_table_fallback(t_server* s, int port) {
     return NULL; 
 }
 
+//Distributed implementation of Chord algorithm stabilize()
 void remote_stabilize(t_server* s, int port) {
     // Get successor IP and node ID while holding lock
     pthread_mutex_lock(&s->lock);
@@ -1260,7 +1192,9 @@ void remote_stabilize(t_server* s, int port) {
     int local_port = s->port;
     pthread_mutex_unlock(&s->lock);
 
+    //Indicates if succesor node failed and fallback process was necessary
     int used_fallback = 0;
+
     Node* temp = remote_get_node(s, local_port, successor_ip);
 
     if (temp == NULL) {
@@ -1300,6 +1234,7 @@ void remote_stabilize(t_server* s, int port) {
             strncpy(s->localNode->fingerTable[0].Ip, x->Ip, MAX_IP_LENGTH - 1);
             s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
 
+            //Persist changes to disk
             saveNodeToFile(s->localNode, "nodeInfo/Node");
             saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
         } else {
@@ -1318,6 +1253,12 @@ void remote_stabilize(t_server* s, int port) {
     successor_ip[sizeof(successor_ip) - 1] = '\0';
     pthread_mutex_unlock(&s->lock);
 
+
+    /*
+       =============================================================================
+        Calls remote communications to initiate remote_notify() in the succesor node
+       ============================================================================= 
+    */
     int sock = init_socket(successor_ip, local_port);
 
     if (sock < 0) {
@@ -1327,6 +1268,7 @@ void remote_stabilize(t_server* s, int port) {
 
     // Send request
     char request[64];
+    //TCP server call that initiates a background notify process in remote node
     snprintf(request, sizeof(request), "STABILIZE %.15s\n", local_ip);
 
     if (send(sock, request, strlen(request), 0) < 0) {
@@ -1354,6 +1296,7 @@ void remote_stabilize(t_server* s, int port) {
         if (strchr(response, '\n')) break; // end of message
     }
 
+    //Checks if no response was received
     if (n <= 0) {
         perror("recv");
         close(sock);
@@ -1363,7 +1306,7 @@ void remote_stabilize(t_server* s, int port) {
 
     response[total] = '\0';
 
-    //Parses information from response into temp variables
+    //Checks if response message is not 'OK'
     if (strncmp(response, "OK", 2) != 0) {
         log_error(response);
     }
@@ -1377,8 +1320,9 @@ void remote_stabilize(t_server* s, int port) {
     return;
 }
 
+//Debugging tool to check Chord ring structure in a distributed network
 void remote_check_ring(t_server* s) {
-    // Get local node info while holding lock
+    // Get local node info copy
     pthread_mutex_lock(&s->lock);
     if (s->localNode == NULL || s->localNode->successor == NULL) {
         pthread_mutex_unlock(&s->lock);
@@ -1404,6 +1348,8 @@ void remote_check_ring(t_server* s) {
     
     //  Send request
     char request[64];
+    //TCP server action (checks predecessor and successor matching)
+    //Initiates check function through every node and stops when looping back to source node
     snprintf(request, sizeof(request), "CHECK_RING %d\n", local_id);
 
     if (send(sock, request, strlen(request), 0) < 0) {
@@ -1419,10 +1365,12 @@ void remote_check_ring(t_server* s) {
     return;
 }
 
-
+//Distributed implementation of Chord algorithm fix_fingers()
 void remote_fix_fingers(t_server* s) {
+    //Generates a random index to choose a finger table entry
     int i = 1 + rand() % NODE_ID_LENGTH;
 
+    //Copy node information to temp variables
     pthread_mutex_lock(&s->lock);
     int start = s->localNode->fingerTable[i-1].start;
     int local_id = s->localNode->id;

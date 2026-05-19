@@ -20,9 +20,13 @@
 
 /*
 Notes:
-    - Problems with split files, only saw first chunk be shared.
 */
 
+/*
+=====================================================
+Helper functions for manipulating hexadecimal strings
+=====================================================
+*/
 char* toUpper_hexadecimal(const char* hexadecimal) {
     size_t len = strlen(hexadecimal);
     char* s_up = malloc(len + 1);
@@ -57,18 +61,23 @@ int hexadecimal_to_decimal(const char* hexadecimal) {
     return decimalNumber;
 }
 
-// DISCLAIMER: In this function change arguments to incorporate appropriate hashing of files
+
+// Takes IP and port of a node and generates a numerical ID to assign as 
+// Chord ring identifier
 int hash_node_identifier(const char* Ip, const char* port) {
     char nodeIdentifier[64]; 
 
+    //Formats IP and port into a single string
     snprintf(nodeIdentifier, sizeof(nodeIdentifier), "%s:%s", Ip, port); 
 
     char result[64];
     char hexresult[41];
     size_t offset;
 
+    //SHA1 hashing of a string
     SHA1(result, nodeIdentifier, strlen(nodeIdentifier));
 
+    //Generates final hexadecimal string
     for( offset = 0; offset < 20; offset++) {
         sprintf( ( hexresult + (2*offset)), "%02x", result[offset]&0xff);
     }
@@ -78,13 +87,17 @@ int hash_node_identifier(const char* Ip, const char* port) {
     return resultId;
 }
 
+//Hashes file name into a Chord ring identifier
+//To place file into corresponding node 
 int hash_file_node(const char* fileName) {
     char result[64];
     char hexresult[41];
     size_t offset;
 
+    //SHA1 hashing of a string
     SHA1(result, fileName, strlen(fileName));
 
+    //Generates final hexadecimal string
     for( offset = 0; offset < 20; offset++) {
         sprintf( ( hexresult + (2*offset)), "%02x", result[offset]&0xff);
     }
@@ -93,87 +106,6 @@ int hash_file_node(const char* fileName) {
 
     return resultId;
 }
-
-/*
-Node* lookup(const char* fileName) {
-    //Hash the identifier to get the corresponding node ID
-    
-    int targetNode = hash_file_node(fileName);
-
-    
-}
-    */
-
-//Looks at all possible locations for a fileChunk 
-// COPIED FROM LOADFINGERTABLE, MODIFY FUNCTION
-/*
-void checkFileLocation(const char* filepath) {
-    FILE* file = fopen(filepath, "r");
-    if (!file) {
-        log_warn("[WARNING] cannot open file %s for reading, finger table will use defaults\n", filepath);
-        return;
-    }
-
-    char line[512];
-    int entry_idx = 0;
-
-    //Loops through every line in the text file and updates the fingerTable
-    while (fgets(line, sizeof(line), file) && entry_idx < NODE_ID_LENGTH) {
-        // Skip comments and empty lines
-        if (line[0] == '#' || line[0] == '\n' || line[0] == '\r') {
-            continue;
-        }
-
-        int idx, start, lower, upper, succ_id;
-        char succ_ip[MAX_IP_LENGTH] = {0};
-
-        int parsed = sscanf(line, 
-                           "entry=%d,start=%d,lower=%d,upper=%d,successor_id=%d,successor_ip=%15s",
-                           &idx, &start, &lower, &upper, &succ_id, succ_ip);
-
-        if (parsed != 6) {
-            log_warn("[WARNING] skipping malformed line: %s\n", line);
-            continue;
-        }
-
-        // Validate entry index
-        if (idx < 0 || idx >= NODE_ID_LENGTH) {
-            log_warn("[WARNING] invalid entry index %d, skipping\n", idx);
-            continue;
-        }
-
-        node->fingerTable[idx].start = start;
-        node->fingerTable[idx].lowerIntervalLimit = lower;
-        node->fingerTable[idx].upperIntervalLimit = upper;
-
-        // Update successor reference
-        //Checks if successor ID and IP are valid before updating the finger table entry
-        if (succ_id != -1 && strcmp(succ_ip, "NONE") != 0) {
-            // Reuse existing successor if IDs match, otherwise create new node
-            if (node->fingerTable[idx].successor == NULL || 
-                node->fingerTable[idx].successor->id != succ_id) {
-                if (node->fingerTable[idx].successor != NULL && 
-                    node->fingerTable[idx].successor != node) {
-                    freeNode(node->fingerTable[idx].successor);
-                }
-                node->fingerTable[idx].successor = createNode(succ_id, succ_ip, "");
-            }
-            strncpy(node->fingerTable[idx].Ip, succ_ip, MAX_IP_LENGTH - 1);
-            node->fingerTable[idx].Ip[MAX_IP_LENGTH - 1] = '\0';
-        } else {
-            // No valid successor, point to self
-            node->fingerTable[idx].successor = node;
-            node->fingerTable[idx].Ip[0] = '\0';
-        }
-
-        entry_idx++;
-    }
-
-    fclose(file);
-    log_info("[INFO] Finger table for node %d loaded from %s\n", node->id, filepath);
-}
-    */
-
 
 // Transfers a local file to a remote node's fileContentPath over TCP.
 // Returns 0 on success, -1 on failure.
@@ -184,7 +116,9 @@ static int tcp_send_file(int port, const char *dest_ip,
         log_error("[STORE_FILE] cannot open local file %s", local_path);
         return -1;
     }
+    //Moves stream cursor to the end of the file
     fseek(f, 0, SEEK_END);
+    //Determines file size from last cursor position
     long filesize = ftell(f);
     fseek(f, 0, SEEK_SET);
 
@@ -214,10 +148,11 @@ static int tcp_send_file(int port, const char *dest_ip,
         return -1;
     }
 
-    // Send file bytes
+    // Send file bytes to receiving client
     char buf[4096];
     size_t bytes_read;
     while ((bytes_read = fread(buf, 1, sizeof(buf), f)) > 0) {
+        //Checks if no bytes were sent
         if (send(sock, buf, bytes_read, 0) < 0) {
             log_error("[STORE_FILE] send data failed");
             fclose(f); close(sock);
@@ -234,6 +169,7 @@ static int tcp_send_file(int port, const char *dest_ip,
     return (strncmp(resp, "OK", 2) == 0) ? 0 : -1;
 }
 
+//Generetes ouput directory to store any given file in a node 
 char* generateDestinationFilePath(Node* destinationNode, const char* identifier) {
     static char destinationFilePath[MAX_FILE_PATH_LENGTH];
     int written = snprintf(destinationFilePath, MAX_FILE_PATH_LENGTH,
@@ -247,26 +183,26 @@ char* generateDestinationFilePath(Node* destinationNode, const char* identifier)
     return destinationFilePath;
 }
 
-//MISSING ALL FILE HAN+DLING LOGIC
-//IF TARGET ID IS NOT LOCAL NODE, MUST DELETE FILE AFTER
+
 //Insert a file from the host node to the corresponding node for the given file identifier
 void insert(t_server* s, const char* filename) {
     //Hash the identifier and find the node responsible for the given identifier
-    //Node* destinationNode1 = lookup(hostNode, identifier);
-
     int destinationId = hash_file_node(filename);
 
     pthread_mutex_lock(&s->lock);
     int port = s->port;
     pthread_mutex_unlock(&s->lock);
 
+    //Counts amount of replicated copies of a given file
     int redundancyCounter = 0;
 
+    //Indicates target node to insert file into
     int loopDestinationId = destinationId;
 
     //redundancyCounter check to store information in set amount of nodes
     //Currently stores in 2 different nodes
     while (redundancyCounter < 2) {
+        //Copy relevant node information
         pthread_mutex_lock(&s->lock);
         if (s->localNode->successor == NULL) {
             break;
@@ -275,8 +211,10 @@ void insert(t_server* s, const char* filename) {
         int localId = s->localNode->id;
         pthread_mutex_unlock(&s->lock);
 
+        //In case of same node, increases Id to find next available successor
         if (loopDestinationId == localId) {
-            if (loopDestinationId >= 1023) {
+            //Loops back ID if exceeds permited range
+            if (loopDestinationId >= (MAX_NUMBER_NODES - 1) ) {
                 loopDestinationId = 0;
             } else {
                 loopDestinationId++;
@@ -284,24 +222,28 @@ void insert(t_server* s, const char* filename) {
             break;
         }
 
+        //Gets destination node information
         Node* destinationNode = remote_find_successor(s, port, loopDestinationId);
 
+         //In case of same node, grabs next available successor
         pthread_mutex_lock(&s->lock);
         if (destinationNode == s->localNode) {
             loopDestinationId = s->localNode->successor->id;
             pthread_mutex_unlock(&s->lock);
 
+            //Increases replicated copy count
             redundancyCounter++;
             continue;
         }
         pthread_mutex_unlock(&s->lock);
         
+        //If invalid node is found
         if (destinationNode == NULL) {
             log_warn("Invalid node for insert operation at ID:%d", loopDestinationId);
 
             //Provisional solution: Increments id until it finds a valid successor 
             //Review to see if there is better alternative in case of failure
-            if (loopDestinationId >= 1023) {
+            if (loopDestinationId >= (MAX_NUMBER_NODES - 1)) {
                 loopDestinationId = 0;
             } else {
                 loopDestinationId++;
@@ -312,12 +254,11 @@ void insert(t_server* s, const char* filename) {
 
         char* fileDirectory = generateDestinationFilePath(destinationNode, filename);
 
-        // Transfer the file using the existing TCP connection instead of scp,
-        // avoiding user-permission issues across machines.
+        // Sends file to destinationNode
         int result = tcp_send_file(port, destinationNode->Ip, filename, fileDirectory);
 
+        //Successfull operation
         if (result == 0) {
-            //Success
             printf("File %s inserted successfully at node ID: %d IP: %s\n", filename ,destinationNode->id, destinationNode->Ip);
 
             //REMOVE - DOES NOT ENSURE ACTUAL REMOTE COPIES - JUST FOR DEBUG PURPOSES
@@ -344,6 +285,7 @@ void insert(t_server* s, const char* filename) {
 }
 
 //Parses registry information into a ChunkEntry object
+// Uses ChordRingFiles format
 static int parse_chunk_entry(const char *s, ChunkEntry *c) {
     memset(c, 0, sizeof(*c));
 
@@ -389,7 +331,9 @@ static int parse_chunk_entry(const char *s, ChunkEntry *c) {
     return 1;
 }
 
-//Copies registry information into provided FileEntry object
+//Copies registry information into individual FileEntry structure
+//Insets information one ChunkEntry at a time
+//Copies information from a single file line
 static int parse_registry_line(const char * line, FileEntry* entry) {
     memset(entry, 0, sizeof(*entry));
 
@@ -435,6 +379,7 @@ static int parse_registry_line(const char * line, FileEntry* entry) {
     return entry->chunk_count > 0 ? 1 : 0;
 }
 
+//Passes line by line information from a file into a FileEntry array structure
 int load_registry(FileEntry* entries, int max_entries, int *out_count) {
     *out_count = 0;
 
@@ -462,6 +407,7 @@ int load_registry(FileEntry* entries, int max_entries, int *out_count) {
     return 0;
 }
 
+//Writes local FileEntry array information into persisted file 'ChordRingFiles'
 int save_registry(const FileEntry * entries, int count) {
     FILE *f = fopen(REGISTRY_PATH, "w");
     if (!f) {
@@ -542,6 +488,8 @@ static int derive_chunk_names(const char *filepath, int num_parts, char names[][
     return 0;
 }
 
+//Calls splitter.sh to partition a given file into separate files
+//Uses bash call to initiate script
 static int split_file(const char* filepath, int num_parts, char chunk_names[][256], int* chunk_count) {
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
@@ -591,6 +539,7 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
         pos++;
     }
 
+    //If error occurs
     if (strncmp(response, "ERROR", 5) == 0) {
         printf("%s\n", response);
         printf("[FETCH_FILE] file not found in remote node %s:%d\n", sourceIp, port);
@@ -610,6 +559,8 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
 
     long received = 0;
     char buf[4096];
+
+    //Writes information from socket communication into 'buf' buffer
     while (received < filesize) {
         long remaining = filesize - received;
         //Determine size of buffer to read next
@@ -624,6 +575,7 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
     fclose(f);
     close(sock);
 
+    //Checks if written information is same length as reported file size
     if (received != filesize) {
         printf("[FETCH_FILE] incomplete file: got %ld of %ld bytes for %s", received, filesize, source_filename);
         return -1;
@@ -632,6 +584,8 @@ int tcp_fetch_file(int port, const char* sourceIp, const char* source_filename, 
     return 0;
 }
 
+//Sends local registry file to another node
+//Used for replicating global registry information - enables file lookup
 static int tcp_send_registry_to(int port, const char *dest_ip, const char* content, long size) {
     int sock = init_socket(dest_ip, port);
     if (sock < 0) return -1;
@@ -663,6 +617,7 @@ static int tcp_send_registry_to(int port, const char *dest_ip, const char* conte
         pos++;
     }
 
+    //Checks for error response message
     if (strncmp(response, "READY", 5) != 0) {
         close(sock);
         return -1;
@@ -697,19 +652,27 @@ static int tcp_send_registry_to(int port, const char *dest_ip, const char* conte
     return (strncmp(response, "OK", 2) == 0) ? 0 : -1;
 }
 
+//Replicates registry file to every node in the Chord ring
 int broadcast_registry(t_server *s, int port) {
     FILE *f = fopen(REGISTRY_PATH, "rb");
+    //Error opening file
     if (!f) return -1;
+
+    //Obtain file size
     fseek(f, 0, SEEK_END);
     long size = ftell(f);
     fseek(f, 0, SEEK_SET);
+
+    //Assigns 'content' buffer and copies information from local registry file
     char *content = malloc((size_t)size + 1);
     if (!content) { fclose(f); return -1; }
     fread(content, 1, (size_t)size, f);
     content[size] = '\0';
     fclose(f);
     
+    //Copies relevant information from local and successor node 
     pthread_mutex_lock(&s->lock);
+    //Checks if valid node succesor
     if (!s->localNode->successor) {
         pthread_mutex_unlock(&s->lock);
         free(content);
@@ -726,54 +689,72 @@ int broadcast_registry(t_server *s, int port) {
     while (visited < (int)MAX_NUMBER_NODES) {
         Node *node = remote_get_node(s, port, next_ip);
         if (!node) break;
+        //If consulted node is the same as local
         if (node->id == local_id) { freeNode(node); break; }
         
+        //Remote send of file contents
         tcp_send_registry_to(port, node->Ip, content, size);
         
+        //Breaks replication if successor is not operational
         if (!node->successor) { freeNode(node); break; }
         strncpy(next_ip, node->successor->Ip, MAX_IP_LENGTH - 1);
         next_ip[MAX_IP_LENGTH - 1] = '\0';
         freeNode(node);
+
+        //Updates amount of visited nodes
         visited++;
     }
     free(content);
     return 0;
 }
 
+//Remotely stores all partitions of a given file
+//Executes whole process of partitioning->searching destination node -> sending file
 int insert_chunked(t_server* s, const char* filepath) {
+    //String array for storing filename of each partition
     char chunk_names[MAX_CHUNKS_PER_FILE][256];
     int chunk_count = 0;
 
+    //Partitions files and stores respective names into filename array
     if (split_file(filepath, DHASH_NUM_CHUNKS, chunk_names, &chunk_count) != 0) {
         log_error("[INSERT_CHUNKED] Failed to split file %s", filepath);
     }
 
     printf("Chunk count: %d\n", chunk_count);
 
+    //Copy local node information
     pthread_mutex_lock(&s->lock);
     int port = s->port;
     pthread_mutex_unlock(&s->lock);
 
+    //Stores pointer to memory location of last slash of directory path
     const char* slash = strrchr(filepath, '/');
+    //Stores pointer to memory location of the start of the base filename
     const char* basename = slash ? slash + 1 : filepath;
 
     char directory_prefix[MAX_FILE_PATH_LENGTH] = {0};
 
     if (slash) {
+        //Obtains length of directory path string - not including filename
         size_t dlen = (size_t)(slash - filepath) + 1;
         if (dlen < sizeof(directory_prefix)) {
             memcpy(directory_prefix, filepath, dlen);
         }
     }
 
+    //Initializes FileEntry object
     FileEntry entry;
     memset(&entry, 0, sizeof(entry));
     strncpy(entry.original_name, basename, sizeof(entry.original_name) - 1);
     entry.chunk_count = chunk_count;
 
+    //Loops for every existing file partition
     for (int i=0; i< chunk_count; i++) {
+        //Local pointer to file chunk
         ChunkEntry *ce = &entry.chunks[i];
         strncpy(ce->name, chunk_names[i], sizeof(ce->name) - 1);
+
+        //Counter for tracking amount of partition copies sent out
         ce->replica_count = 0;
 
         // Formula for obtaining Chord ring from hash: SHA1(name) mod (2^n)
@@ -783,11 +764,15 @@ int insert_chunked(t_server* s, const char* filepath) {
 
         char prev_ip[MAX_IP_LENGTH] = {0};
 
+        //Loops for every copy needed for each file partition
         for (int r=0; r<DHASH_REPLICA_COUNT; r++) {
+            //Node to send file partition to
             Node* destination;
             if (r==0) {
+                //If first loop, obtain immediate successor
                 destination = remote_find_successor(s, port, base_id);
             } else {
+                //If no valid node is found, registers null to evetually skip loop
                 destination = prev_ip[0] ? remote_get_node(s, port, prev_ip) : NULL;
 
                 if (destination) {
@@ -796,20 +781,25 @@ int insert_chunked(t_server* s, const char* filepath) {
                 }
             }
 
+            //No valid destination node found
             if (!destination) {
                 log_warn("[INSERT_CHUNKED] No node for chunk %s replica %d", chunk_names[i], r);
 
                 continue;
             }
 
+            //Builds complete ouput directory path for file partition storage 
             char chunk_path[512];
             snprintf(chunk_path, sizeof(chunk_path), "%s/%s", directory_prefix, chunk_names[i]);
 
+            //Sends partition to node and verifies success
             if (tcp_send_file(port, destination->Ip, chunk_names[i], chunk_path) == 0) {
+                //Updates registry information with destination node info
                 ce->node_ids[ce->replica_count] = destination->id;
                 strncpy(ce->node_ips[ce->replica_count], destination->Ip, MAX_IP_LENGTH - 1);
                 ce->replica_count++;
                 
+                //Copies destination ip to prev_ip
                 strncpy(prev_ip, destination->Ip, MAX_IP_LENGTH - 1);
 
                 //entry.chunks[ce->replica_count] = *ce;
@@ -821,7 +811,7 @@ int insert_chunked(t_server* s, const char* filepath) {
         }
     }
 
-    //Update registry file
+    //Update persisted registry file
     FileEntry registry[MAX_REGISTRY_ENTRIES];
     int registry_count = 0;
     load_registry(registry, MAX_REGISTRY_ENTRIES, &registry_count);
@@ -832,11 +822,13 @@ int insert_chunked(t_server* s, const char* filepath) {
     return 0;
 }
 
+//Reconstruct a file from its partitions stored in other nodes
 int retrieve_file(t_server *s, const char* original_filename, const char* output_dir) {
     pthread_mutex_lock(&s->lock);
     int port = s->port;
     pthread_mutex_unlock(&s->lock);
 
+    //Loads registry information into local variable
     FileEntry registry[MAX_REGISTRY_ENTRIES];
     int reg_count = 0;
     if (load_registry(registry, MAX_REGISTRY_ENTRIES, &reg_count) != 0) {
@@ -844,7 +836,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
         return -1;
     }
 
-    //Find the target entry within the registry
+    //Find the target entry within the registry, saves to 'entry' local variable
     FileEntry* entry = NULL;
     for (int i = 0; i < reg_count; i++) {
         if (strcmp(registry[i].original_name, original_filename) == 0) {
@@ -858,14 +850,11 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
         return -1;
     }
 
+    //Constructs temporary directory to store all retrieved file partitions
+    // to later reconstruct final file
     char tmpdir[512];
     snprintf(tmpdir, sizeof(tmpdir), "/tmp/chord_retrieve_%d", getpid());
     {
-        /*
-        char mkdir_cmd[600];
-        snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p \"%s\"", tmpdir);
-        system(mkdir_cmd);
-        */
        // Create the directory with read/write/search permissions for the owner (0700)
        if (mkdir(tmpdir, 0700) == -1) {
             if (errno != EEXIST) {
@@ -877,6 +866,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
        }
     }
 
+    //Loop for retrieving every file partition
     for (int i = 0; i < entry->chunk_count; i++) {
         ChunkEntry* c = &entry->chunks[i];
         int fetched = 0;
@@ -886,6 +876,8 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
             char full_path[1024];
             char destination_path[512];
 
+            //Constructs output directory for file partition on local node
+            // Built from the temporary directory path and the corresponding partition name
             int result = snprintf(full_path, sizeof(full_path), "%s/%s", tmpdir,c->name);
 
             printf("Full path %s with result value %d\n", full_path, result);
@@ -897,6 +889,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
                 destination_path[sizeof(destination_path) - 1] = '\0';
             }
 
+            //Executes remote file fetching
             if (tcp_fetch_file(port, c->node_ips[j], c->name, full_path) == 0) {
                 fetched = 1;
             } else {
@@ -904,6 +897,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
             }
         }
 
+        //Checks if any copies of the target partition were retrieved
         if (!fetched) {
             printf("[RETRIEVE_FILE] All replicated copies failed for chunk %s\n", c->name);
             return -1;
@@ -912,16 +906,21 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
         }
     }
 
+    //Output path for final file reconstruction
     char out_path[512];
     snprintf(out_path, sizeof(out_path), "%s/%s", output_dir, original_filename);
 
     printf("Output path is %s\n", out_path);
 
+    //Builds 'cat' command to concatenate all file partitions into original file
     char cat_cmd[2048];
-    //Tracks position for text insertion in 'cat' command
+    //Variable tracks position for text insertion in 'cat' command
     int pos = snprintf(cat_cmd, sizeof(cat_cmd), "cat");
-    //Adds initial
+    
+    //Adds output path for cat
     pos += snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " \"%s\"", out_path);
+    
+    //Adds every file partition path for concatenation
     for (int i = 0; i < entry->chunk_count && pos < (int)sizeof(cat_cmd) - 256; i++) {
         pos += snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " \"%s/%s\"", tmpdir, entry->chunks[i].name);
     }
@@ -929,6 +928,7 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
 
     printf("Cat command: %s\n", cat_cmd);
 
+    //Executes 'cat' command
     if (system(cat_cmd) != 0) {
         printf("[RETRIEVE_FILE] Concatenation failed");
         return -1;

@@ -2,9 +2,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
-/*
-tutorial for code: https://medium.com/@oduwoledare/server-side-story-creating-a-multi-client-tcp-server-with-c-and-select-3692db1a8ca3
-*/
+
 
 #include "tcpServer.h"
 #include "logger.h"
@@ -14,7 +12,8 @@ tutorial for code: https://medium.com/@oduwoledare/server-side-story-creating-a-
 void fatalError(t_server *s);
 void handle_command(t_server *s, t_client *cli, char *msg);
 
-//Extract message from client's message buffer, returning 1 if a complete message was extracted, 0 if not and -1 if an error occurred
+//Extract message from client's message buffer, returning 1 if a complete message was extracted,
+// 0 if not and -1 if an error occurred
 int extract_message(char **buf, char **msg) {
     char *newbuf;
     int i;
@@ -38,25 +37,33 @@ int extract_message(char **buf, char **msg) {
     return (0);
 }
 
+//Appends add to buf, freeing buf in the process; 
+// returns newly allocated string or NULL on Out-Of-Memory
 char *str_join(char *buf, char *add) {
     char *newbuf;
     int  len;
 
     if (buf == 0)
     len = 0;
+
     else
     len = strlen(buf);
+    
     newbuf = malloc(sizeof(*newbuf) * (len + strlen(add) + 1));
+    
     if (newbuf == 0)
     return (0);
+
     newbuf[0] = 0;
     if (buf != 0)
     strcat(newbuf, buf);
+
     free(buf);
     strcat(newbuf, add);
     return (newbuf);
 }
 
+//Closes client's socket fd and frees the client struct along with its message buffer
 void freeClient(t_client *cli) {
     if (cli) {
         if (cli->msg) free(cli->msg);
@@ -91,6 +98,7 @@ t_client *findClient(t_server *s, int fd) {
     return tmp;
 }
 
+//Unlinks the client with matching fd from the server's linked list and frees it
 void removeClient(t_server *s, int fd) {
     t_client *tmp = s->head;
     t_client *prev = NULL;
@@ -138,6 +146,7 @@ void sendNotification(t_server *s, int fd, char *msg) {
     while (cli) {
         t_client *next = cli->next; // save before possible removal
         if (FD_ISSET(cli->fd, &s->writefds) && cli->fd != fd) {
+
             if (send(cli->fd, msg, strlen(msg), 0) < 0) {
                 // Peer disconnected mid-loop — clean up and continue instead
                 // of crashing the server. The stale fd will be removed here.
@@ -149,6 +158,7 @@ void sendNotification(t_server *s, int fd, char *msg) {
     }
 }
 
+//Drains all complete newline-terminated messages from cli's buffer and dispatches each to handle_command
 void sendMessage(t_server *s, t_client *cli) {
     char buf[127];
     char *msg;
@@ -168,6 +178,7 @@ void sendMessage(t_server *s, t_client *cli) {
 }
 
 //Removes client from linked list and cleans up its file descriptor
+//Used for completing removing knowledge of said client
 void deregisterClient(t_server *s, int fd, int cli_id) {
     (void)cli_id;
     FD_CLR(fd, &s->active_fds);
@@ -192,6 +203,7 @@ void processMessage(t_server *s, int fd) {
 }
 
 
+//Wraps addClient and adds the new fd to active_fds so select() begins monitoring it
 void registerClient(t_server *s, int fd) {
     t_client *cli = addClient(s, fd);
 
@@ -224,6 +236,7 @@ void monitorFDs(t_server *s) {
     while (fd <= s->max_fd)
     {
         if (FD_ISSET(fd, &s->readfds))
+        //Checks if it is a new client (adds to linked list), if not processes message
             (fd == s->sockfd) ? acceptRegistration(s) : processMessage(s, fd);
         fd++;
     }
@@ -264,9 +277,12 @@ void createSock(t_server *s) {
     setsockopt(s->sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
 
     FD_SET(s->sockfd, &s->active_fds);
+
+    //New fd becomes the max fd
     s->max_fd = s->sockfd;
 }
 
+//Allocates and initialises a t_server, including the shared localNode pointer and mutex
 t_server *initServer(int port, Node* node) {
     t_server *s = (t_server *)malloc(sizeof(t_server));
     if (!s) fatalError(NULL);
@@ -282,6 +298,8 @@ t_server *initServer(int port, Node* node) {
     return s;
 }
 
+//Thread entry point: runs the select()-based accept/receive loop indefinitely
+// Each thread monitors the incoming signals independetly
 void *server_loop(void *arg) {
     t_server *s = (t_server *)arg;
 
@@ -295,7 +313,7 @@ void *server_loop(void *arg) {
 }
 
 // ---- worker-thread infrastructure for outgoing TCP calls ----
-// Keeps server_loop's select() thread non-blocking (Fix #3).
+// Keeps server_loop's select() thread non-blocking.
 
 typedef struct {
     t_server *s;
@@ -337,6 +355,7 @@ typedef struct {
     long      size;
 } update_registry_task_t;
 
+//Detached worker: calls remote_notify on the caller's IP then frees the task
 static void *notify_worker(void *arg) {
     notify_task_t *task = (notify_task_t *)arg;
     remote_notify(task->s, task->port, task->ip);
@@ -344,6 +363,7 @@ static void *notify_worker(void *arg) {
     return NULL;
 }
 
+//Detached worker: performs the full remote_join handshake then frees the task
 static void *join_worker(void *arg) {
     join_task_t *task = (join_task_t *)arg;
     remote_join(task->ip, task->port, task->s);
@@ -351,6 +371,7 @@ static void *join_worker(void *arg) {
     return NULL;
 }
 
+//Detached worker: validates successor/predecessor both ways at a given node, then forwards CHECK_RING to the successor
 static void *check_ring_worker(void *arg) {
     check_ring_task_t *task = (check_ring_task_t *)arg;
     t_server *s    = task->s;
@@ -390,6 +411,8 @@ static void *check_ring_worker(void *arg) {
     return NULL;
 }
 
+//Detached worker: streams exactly filesize bytes from fd into the node's local file store
+// Used for storing incoming files from remote communicatino
 static void *store_file_worker(void *arg) {
     store_file_task_t *task = (store_file_task_t *)arg;
     int fd = task->fd;
@@ -528,6 +551,8 @@ static void *update_registry_worker(void *arg) {
     return NULL;
 }
 
+//Creates a detached pthread running given function: fn(arg); frees arg if pthread_create fails
+//Used to create all worker threads
 static void spawn_detached(void *(*fn)(void *), void *arg) {
     pthread_t      tid;
     pthread_attr_t attr;
@@ -542,6 +567,7 @@ static void spawn_detached(void *(*fn)(void *), void *arg) {
 
 // --------------------------------------------------------------
 
+//Parses a single newline-terminated command from msg and dispatches to the appropriate Chord or file-transfer handler
 void handle_command(t_server *s, t_client *cli, char *msg) {
     char cmd[64];
 
@@ -574,6 +600,9 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         }
     }
 
+    // --------------------
+    // STABILIZE
+    // --------------------
     else if (strcmp(cmd, "STABILIZE") == 0) {
         char existingIp[64];
         if (sscanf(msg, "STABILIZE %63s", existingIp) == 1) {
@@ -619,25 +648,9 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         }
     }
 
-    /*
-    else if (strcmp(cmd, "FIND_PREDECESSOR") == 0) {
-        int id;
-
-        if (sscanf(msg, "FIND_PREDECESSOR %d", &id) == 1) {
-            Node* temp = s->localNode;
-
-            while (!half_left_open_interval(temp->id, temp->id, temp->successor->id)) {
-
-                temp = remote_closest_preceding_finger(,temp->id)
-            }
-
-            send(cli->fd, "OK\n", 3, 0);
-        } else {
-            send(cli->fd, "ERROR Invalid FIND_PREDECESSOR\n", 31, 0);
-        }
-    }
-        */
-
+    // --------------------
+    // CLOSEST_PRECEDING_FINGER
+    // --------------------
     else if (strcmp(cmd, "CLOSEST_PRECEDING_FINGER") == 0) {
         int id;
 
@@ -660,6 +673,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
 
     // --------------------
     // GET_NODE
+    // Returns information of local node to the requester
     // --------------------
     else if (strcmp(cmd, "GET_NODE") == 0) {
         pthread_mutex_lock(&s->lock);
@@ -687,6 +701,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
 
     // --------------------
     // CHECK_RING
+    // Debug feature for validating chord ring structure
     // --------------------
     else if (strcmp(cmd, "CHECK_RING") == 0) {
         int startingNode = 0;
@@ -735,6 +750,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
 
     // --------------------
     // STORE_FILE
+    // Initiates worker for copying information from incoming message into a local file
     // --------------------
     else if (strcmp(cmd, "STORE_FILE") == 0) {
         char filename[256];
@@ -765,6 +781,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
 
     // --------------------
     // FETCH_FILE
+    // Spawns worker for sending requested file to client
     // --------------------
     else if (strcmp(cmd, "FETCH_FILE") == 0) {
         char filename[256];
@@ -792,6 +809,7 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
 
     // --------------------
     // UPDATE_REGISTRY
+    // Spawns worker for overwriting local registry file with new information
     // --------------------
     else if (strcmp(cmd, "UPDATE_REGISTRY") == 0) {
         long size;
@@ -819,23 +837,3 @@ void handle_command(t_server *s, t_client *cli, char *msg) {
         send(cli->fd, "ERROR Unknown command\n", 23, 0);
     }
 }
-
-/*
-int main(int ac, char **av) {
-    if (ac != 2) {
-        write(2, "Wrong number of argument\n", 26);
-        exit(1);
-    }
-    int port = atoi(av[1]);
-    if (port <= 0 || port > 65535) fatalError(NULL);
-    t_server *serv = initServer(port);
-    if (serv) {
-        createSock(serv);
-        configAddr(serv);
-        bindAndListen(serv);
-        handleCon(serv);
-        deleteAll(serv);
-    }
-    return (0);
-}
-    */
