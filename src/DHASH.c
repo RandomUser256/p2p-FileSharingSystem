@@ -14,6 +14,9 @@
 #include <math.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <errno.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
 /*
 Notes:
@@ -403,7 +406,9 @@ static int parse_registry_line(const char * line, FileEntry* entry) {
 
     const char *p = comma + 1;
     while (*p) {
-        while (*p == ',') p++;
+        while (*p == ' ') p++;
+
+        //Invalid file if first line is space
         if (!*p) break;
 
         /* a chunk token ends at the ']' closing the IP list;
@@ -425,6 +430,8 @@ static int parse_registry_line(const char * line, FileEntry* entry) {
         p = ip_close + 1;
         if (*p == ',') p++;
     }
+    printf("Line parsing completed for file %s\n", entry->original_name);
+
     return entry->chunk_count > 0 ? 1 : 0;
 }
 
@@ -433,7 +440,7 @@ int load_registry(FileEntry* entries, int max_entries, int *out_count) {
 
     FILE *f = fopen(REGISTRY_PATH, "r");
     if (!f) {
-        printf("[LOAD_REGISTRY] unable to open %s", REGISTRY_PATH);
+        printf("[LOAD_REGISTRY] unable to open %s\n", REGISTRY_PATH);
         return -1;
     }
     
@@ -450,6 +457,7 @@ int load_registry(FileEntry* entries, int max_entries, int *out_count) {
     }
     fclose(f);
 
+    printf("Loading registry complete\n");
 
     return 0;
 }
@@ -851,11 +859,22 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
     }
 
     char tmpdir[512];
-    snprintf(tmpdir, sizeof(tmpdir), "/tmp/chord_retrieve_%d", (int)getpid());
+    snprintf(tmpdir, sizeof(tmpdir), "/tmp/chord_retrieve_%d", getpid());
     {
+        /*
         char mkdir_cmd[600];
         snprintf(mkdir_cmd, sizeof(mkdir_cmd), "mkdir -p \"%s\"", tmpdir);
         system(mkdir_cmd);
+        */
+       // Create the directory with read/write/search permissions for the owner (0700)
+       if (mkdir(tmpdir, 0700) == -1) {
+            if (errno != EEXIST) {
+                printf("Failed to create directory for file retrieval\n");
+                return -1;
+            }
+       } else {
+            printf("Temp file directory succesfully created\n");
+       }
     }
 
     for (int i = 0; i < entry->chunk_count; i++) {
@@ -867,17 +886,18 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
             char full_path[1024];
             char destination_path[512];
 
-            int result = snprintf(full_path, sizeof(full_path), "%s/%s", c->name, destination_path);
+            int result = snprintf(full_path, sizeof(full_path), "%s/%s", tmpdir,c->name);
+
+            printf("Full path %s with result value %d\n", full_path, result);
 
             if (result >= sizeof(full_path)) {
                 fprintf(stderr, "Error: Path is too long for the buffer.\n");
             } else {
-                // 4. If you need the result back in destination_path, copy it now
                 strncpy(destination_path, full_path, sizeof(destination_path) - 1);
                 destination_path[sizeof(destination_path) - 1] = '\0';
             }
 
-            if (tcp_fetch_file(port, c->node_ips[j], c->name, destination_path) == 0) {
+            if (tcp_fetch_file(port, c->node_ips[j], c->name, full_path) == 0) {
                 fetched = 1;
             } else {
                 printf("[RETRIEVE_FILE] Unable to retrieve chunk %s replica %d %ls\n", c->name, j, c->node_ids);
@@ -887,18 +907,27 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
         if (!fetched) {
             printf("[RETRIEVE_FILE] All replicated copies failed for chunk %s\n", c->name);
             return -1;
+        } else {
+            printf("Succesfully fetched chunk %s\n", c->name);
         }
     }
 
     char out_path[512];
     snprintf(out_path, sizeof(out_path), "%s/%s", output_dir, original_filename);
 
+    printf("Output path is %s\n", out_path);
+
     char cat_cmd[2048];
+    //Tracks position for text insertion in 'cat' command
     int pos = snprintf(cat_cmd, sizeof(cat_cmd), "cat");
+    //Adds initial
+    pos += snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " \"%s\"", out_path);
     for (int i = 0; i < entry->chunk_count && pos < (int)sizeof(cat_cmd) - 256; i++) {
-        pos += snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " \"%s\"", out_path);
+        pos += snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " \"%s/%s\"", tmpdir, entry->chunks[i].name);
     }
     snprintf(cat_cmd + pos, sizeof(cat_cmd) - (size_t)pos, " > \"%s\"", out_path);
+
+    printf("Cat command: %s\n", cat_cmd);
 
     if (system(cat_cmd) != 0) {
         printf("[RETRIEVE_FILE] Concatenation failed");
