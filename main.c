@@ -1,7 +1,11 @@
-#include <math.h>
-#include <time.h>
 #include <pthread.h>
 #include <arpa/inet.h>
+
+
+#include <stdio.h>
+#include <string.h>
+#include <math.h>
+#include <time.h>
 
 #include "src/DHASH.h"
 #include "src/node.h"
@@ -13,7 +17,7 @@
 /*
 NOTE: Compile all source files together:
 
-gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c -o main -pthread -lm
+gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c src/sha1.c -o main -pthread -lm
 
 This compiles:
   - main.c (your program)
@@ -76,7 +80,7 @@ int main() {
     pthread_create(&server_tid, NULL, server_loop, serv);
 
     // Background service that maintains chord ring integrity
-    MaintenanceThread* mt = start_maintenance_thread(serv, 200, 8000); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
+    MaintenanceThread* mt = start_maintenance_thread(serv, 200, 800); // Maintenance thread with 200ms stabilize interval and 8000ms fix fingers interval
 
     printf("\n╔════════════════════════════════════════════════════════════╗\n");
     printf("║  Chord Node %d Started with Background Maintenance       ║\n", localNode->id);
@@ -98,7 +102,6 @@ int main() {
         // Process the command
         if (strcmp(input, "n") == 0) {
             // Join a new node to the network
-
             printf("Enter IP of existing node to join: ");
 
             if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -169,10 +172,44 @@ int main() {
             set_log_level(get_log_level() == LOG_NONE ? LOG_WARN : LOG_NONE);
             printf("Error/warning logs %s\n", get_log_level() == LOG_NONE ? "disabled" : "enabled");
         }
+        else if (strcmp(input, "i") == 0) {
+            char filename[256];
+            printf("Enter filename: ");
+
+            if (fgets(filename, sizeof(filename), stdin)) {
+                // fgets keeps the newline character '\n', so we usually strip it:
+                filename[strcspn(filename, "\n")] = 0;
+            }
+
+            printf("Read file name\n");
+
+            char filePath[512] = {0}; 
+            snprintf(filePath, sizeof(filePath), "shared/files/%s", filename);
+
+            insert_chunked(serv, filePath);
+        }
+        else if (strcmp(input, "r") == 0) {
+            char filename[256];
+            printf("Enter filename to retrieve: ");
+
+            if (fgets(filename, sizeof(filename), stdin)) {
+                // fgets keeps the newline character '\n', so we usually strip it:
+                filename[strcspn(filename, "\n")] = 0;
+            }
+
+            printf("Read file name: %s\n", filename);
+
+            /*
+            char filePath[512] = {0}; 
+            snprintf(filePath, sizeof(filePath), "shared/files/%s", filename);
+            */
+            retrieve_file(serv, filename , "shared/files");
+        }
         else {
             printf("Invalid command. Please try again.\n");
         }
     }
 
+    
     return 0;
 }

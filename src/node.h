@@ -8,7 +8,7 @@ typedef struct s_server t_server;
 
 #define MAX_IP_LENGTH 16
 #define MAX_FILE_PATH_LENGTH 256
-#define NODE_ID_LENGTH 10 //in bits, equal to 16 total nodes
+#define NODE_ID_LENGTH 4 //in bits, equal to 16 total nodes (2^4 = 16)
 #define MAX_NUMBER_NODES (1U << NODE_ID_LENGTH) //Maximum number of nodes in the network
 
 int in_open_interval(int id, int start, int end);
@@ -39,10 +39,7 @@ typedef struct Node {
     struct FingerTableEntry fingerTable[NODE_ID_LENGTH];
 } Node;
 
-bool nullCheckNode(Node* node);
-bool nullCheckFingerTable(FingerTableEntry* entry);
 FingerTableEntry* createFingerTableEntry(int entryNumber, Node* parent_node, Node* successor);
-void updateValuesFingerTable(Node* node);
 
 Node* createNode(int id, const char* ip, const char* fileContentPath);
 void saveFingerTableToFile(Node* node, const char* filepath);
