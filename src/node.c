@@ -1103,11 +1103,38 @@ void remote_notify(t_server* s, int port, const char* existingIp) {
         return;
     }
 
+    // Determine whether to accept otherNode as our new predecessor.
+    // Fallback: if the interval check fails, check current predecessor
+    // if it is unreachable (dead), accept the candidate unconditionally.
+    // If incorrect, it will fix itself
+    bool accept_pred = false;
+    char cur_pred_ip[MAX_IP_LENGTH] = {0};
+    bool need_probe = false;
+
     pthread_mutex_lock(&s->lock);
-    if (s->localNode != NULL &&
-        (s->localNode->predecessor == NULL ||
-         in_open_interval(otherNode->id, s->localNode->predecessor->id, s->localNode->id))) {
-        // Free old predecessor before overwriting — matches notify()'s saveNodeToFile step
+    if (s->localNode != NULL) {
+        if (s->localNode->predecessor == NULL ||
+            in_open_interval(otherNode->id, s->localNode->predecessor->id, s->localNode->id)) {
+            accept_pred = true;
+        } else if (s->localNode->predecessor != s->localNode) {
+            strncpy(cur_pred_ip, s->localNode->predecessor->Ip, MAX_IP_LENGTH - 1);
+            cur_pred_ip[MAX_IP_LENGTH - 1] = '\0';
+            need_probe = true;
+        }
+    }
+    pthread_mutex_unlock(&s->lock);
+
+    if (need_probe) {
+        int probe = init_socket(cur_pred_ip, port);
+        if (probe < 0) {
+            accept_pred = true;  // current predecessor is dead — accept the new one
+        } else {
+            close(probe);
+        }
+    }
+
+    pthread_mutex_lock(&s->lock);
+    if (accept_pred && s->localNode != NULL) {
         Node* old_pred = s->localNode->predecessor;
         if (old_pred != NULL && old_pred != s->localNode) freeNode(old_pred);
         s->localNode->predecessor = otherNode;
@@ -1226,33 +1253,43 @@ void remote_stabilize(t_server* s, int port) {
     // available live node — using temp->predecessor here would immediately undo the
     // fallback with whatever stale/self-referential predecessor the remote peer reports.
     if (!used_fallback && x != NULL && in_open_interval(x->id, local_id, temp->id)) {
-        Node* new_successor = createNode(x->id, x->Ip, x->fileContentPath);
-        if (new_successor == NULL) {
-            perror("Failed to allocate memory for new successor");
-            freeNode(temp);
-            return;
-        }
-
-        pthread_mutex_lock(&s->lock);
-        if (s->localNode != NULL) {
-            Node* old_succ = s->localNode->successor;
-            if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
-            s->localNode->successor = new_successor;
-
-            // Keep fingerTable[0] in sync — matching stabilize()'s saveNodeToFile step
-            Node* old_f0 = s->localNode->fingerTable[0].successor;
-            if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);
-            s->localNode->fingerTable[0].successor = createNode(x->id, x->Ip, x->fileContentPath);
-            strncpy(s->localNode->fingerTable[0].Ip, x->Ip, MAX_IP_LENGTH - 1);
-            s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
-
-            //Persist changes to disk
-            saveNodeToFile(s->localNode, "nodeInfo/Node");
-            saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+        // Probe x before adopting it. The successor may report a stale predecessor
+        // that points to a dead node; blindly adopting it causes an oscillation
+        // where we revert to the dead node every other stabilize cycle.
+        int probe = init_socket(x->Ip, local_port);
+        if (probe < 0) {
+            log_warn("remote_stabilize: skipping unreachable intermediate node %d (%s) reported by successor",
+                     x->id, x->Ip);
         } else {
-            freeNode(new_successor);
+            close(probe);
+            Node* new_successor = createNode(x->id, x->Ip, x->fileContentPath);
+            if (new_successor == NULL) {
+                perror("Failed to allocate memory for new successor");
+                freeNode(temp);
+                return;
+            }
+
+            pthread_mutex_lock(&s->lock);
+            if (s->localNode != NULL) {
+                Node* old_succ = s->localNode->successor;
+                if (old_succ != NULL && old_succ != s->localNode) freeNode(old_succ);
+                s->localNode->successor = new_successor;
+
+                // Keep fingerTable[0] in sync — matching stabilize()'s saveNodeToFile step
+                Node* old_f0 = s->localNode->fingerTable[0].successor;
+                if (old_f0 != NULL && old_f0 != s->localNode) freeNode(old_f0);
+                s->localNode->fingerTable[0].successor = createNode(x->id, x->Ip, x->fileContentPath);
+                strncpy(s->localNode->fingerTable[0].Ip, x->Ip, MAX_IP_LENGTH - 1);
+                s->localNode->fingerTable[0].Ip[MAX_IP_LENGTH - 1] = '\0';
+
+                //Persist changes to disk
+                saveNodeToFile(s->localNode, "nodeInfo/Node");
+                saveFingerTableToFile(s->localNode, "nodeInfo/FingerTable");
+            } else {
+                freeNode(new_successor);
+            }
+            pthread_mutex_unlock(&s->lock);
         }
-        pthread_mutex_unlock(&s->lock);
     }
 
     pthread_mutex_lock(&s->lock);
