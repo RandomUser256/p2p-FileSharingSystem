@@ -896,7 +896,11 @@ Node* remote_find_predecessor(t_server* s, int port, int targetId) {
             }
 
             freeNode(predecessor);
-            predecessor = cpf_copy;
+            // Fetch real node state so successor pointer is correct for the next
+            // loop iteration — finger table entries store successor=self by default.
+            predecessor = remote_get_node(s, port, cpf_copy->Ip);
+            freeNode(cpf_copy);
+            if (predecessor == NULL) break;
 
         } else {
             //Checks if init socket fails and returns NULL if it does
