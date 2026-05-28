@@ -1,7 +1,7 @@
 #include <pthread.h>
 #include <arpa/inet.h>
 
-
+#include <dirent.h>
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -37,6 +37,49 @@ TODO
             - in the SSH command it does not specify which user to use, check version in remote_join() to change all other ssh commands
     - In node.c and DHASH.c, changed the ssh commmand section 'cd /home/mmagallanes' to accept arguments to change the user name depending on the machine
 */
+
+static void list_shared_files(void) {
+    DIR *dir = opendir("shared/files");
+    if (!dir) {
+        printf("  (could not open shared/files)\n\n");
+        return;
+    }
+    printf("\n  Files available to insert:\n");
+    printf("  ──────────────────────────\n");
+    struct dirent *entry;
+    int count = 0;
+    while ((entry = readdir(dir)) != NULL) {
+        if (entry->d_name[0] == '.') continue;
+        printf("  • %s\n", entry->d_name);
+        count++;
+    }
+    if (count == 0) printf("  (no files found)\n");
+    printf("\n");
+    closedir(dir);
+}
+
+static void list_ring_files(void) {
+    FILE *f = fopen("shared/ChordRingFiles", "r");
+    if (!f) {
+        printf("  (could not open shared/ChordRingFiles)\n\n");
+        return;
+    }
+    printf("\n  Files stored in the Chord ring:\n");
+    printf("  ────────────────────────────────\n");
+    char line[512];
+    int count = 0;
+    while (fgets(line, sizeof(line), f)) {
+        char *comma = strchr(line, ',');
+        if (comma) *comma = '\0';
+        line[strcspn(line, "\r\n")] = '\0';
+        if (line[0] == '\0') continue;
+        printf("  • %s\n", line);
+        count++;
+    }
+    if (count == 0) printf("  (no files found)\n");
+    printf("\n");
+    fclose(f);
+}
 
 int main() {
     set_log_level(LOG_NONE); // Set to LOG_INFO or LOG_DEBUG for more detailed output
@@ -89,7 +132,21 @@ int main() {
 
     while (true) {
         // 1. Print a prompt
-        printf("Enter command: join node to network [n] (only if new to the network), get succesor [f], get predecessor [p], test chord ring structure [t], get current node information [g], toggle system logs [l], toggle error/warning logs [w], or exit [e]): ");
+        printf("\n  ┌─────────────────────────────────────────┐\n");
+        printf("  │            Chord Node Commands          │\n");
+        printf("  ├─────────────────────────────────────────┤\n");
+        printf("  │  n  — Join an existing network          │\n");
+        printf("  │  f  — Find successor of an ID           │\n");
+        printf("  │  p  — Find predecessor of this node     │\n");
+        printf("  │  t  — Test ring structure               │\n");
+        printf("  │  g  — Show this node's info             │\n");
+        printf("  │  i  — Insert a file into the ring       │\n");
+        printf("  │  r  — Retrieve a file from the ring     │\n");
+        printf("  │  l  — Toggle info logs                  │\n");
+        printf("  │  w  — Toggle warning logs               │\n");
+        printf("  │  e  — Exit                              │\n");
+        printf("  └─────────────────────────────────────────┘\n");
+        printf("  > ");
         
         // 2. Read input from user
         if (fgets(input, sizeof(input), stdin) == NULL) {
@@ -173,8 +230,9 @@ int main() {
             printf("Error/warning logs %s\n", get_log_level() == LOG_NONE ? "disabled" : "enabled");
         }
         else if (strcmp(input, "i") == 0) {
+            list_shared_files();
             char filename[256];
-            printf("Enter filename: ");
+            printf("Enter filename to insert: ");
 
             if (fgets(filename, sizeof(filename), stdin)) {
                 // fgets keeps the newline character '\n', so we usually strip it:
@@ -189,6 +247,7 @@ int main() {
             insert_chunked(serv, filePath);
         }
         else if (strcmp(input, "r") == 0) {
+            list_ring_files();
             char filename[256];
             printf("Enter filename to retrieve: ");
 
