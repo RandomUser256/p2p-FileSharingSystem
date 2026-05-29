@@ -890,7 +890,16 @@ int retrieve_file(t_server *s, const char* original_filename, const char* output
             }
 
             //Executes remote file fetching
-            if (tcp_fetch_file(port, c->node_ips[j], c->name, full_path) == 0) {
+            if (c->node_ips[j] == s->localNode->Ip) {
+                char mv_command[1024];
+                snprintf(mv_command, sizeof(mv_command), "cp shared/files/%s %s", c->name, tmpdir);
+
+                if (system(mv_command) != 0) {
+                    log_error("Unable to load locally stored file %s", c->name);
+                    continue;
+                }
+            }
+            else if (tcp_fetch_file(port, c->node_ips[j], c->name, full_path) == 0) {
                 fetched = 1;
             } else {
                 printf("[RETRIEVE_FILE] Unable to retrieve chunk %s replica %d %ls\n", c->name, j, c->node_ids);
