@@ -11,4 +11,5 @@ The `main` main executable contains the logic for the entire program, each node 
 - `shared` directory
 
 Does not support file creation/editing within program, all files uploaded to the network must previously be found within the container's file system. 
-> To start using the system, run the following in the command line `./main`
+> To start using the system, run the `main` executable with `./main`
+> If it does not run correctly, delete executable and recompile with command `gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c src/sha1.c -o main -pthread -lm`
