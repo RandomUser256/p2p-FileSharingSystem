@@ -15,9 +15,7 @@
 
 
 /*
-NOTE: Compile all source files together:
-
-gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c src/sha1.c -o main -pthread -lm
+Compile command: gcc main.c src/node.c src/DHASH.c src/maintenance.c src/logger.c src/tcpServer.c src/sha1.c -o main -pthread -lm
 
 This compiles:
   - main.c (your program)
@@ -30,12 +28,7 @@ And links against libm (math library) with pthread support
 
 /*
 TODO
-    - Error when checking ring structure
-        - In node.c: remote_get_successor() called within remote_stabilize() is not working correctly, causing the ring structure check to fail when it tries to get the successor of the predecessor of a node
-        - In DHASH.c: remote_find_successor() is not working, 
-            - the relative path in the remote ssh commands may be the problem
-            - in the SSH command it does not specify which user to use, check version in remote_join() to change all other ssh commands
-    - In node.c and DHASH.c, changed the ssh commmand section 'cd /home/mmagallanes' to accept arguments to change the user name depending on the machine
+    - Variable storage directory support: In node.c and DHASH.c, changed the ssh commmand section 'cd /home/mmagallanes' to accept arguments to change the user name depending on the machine
 */
 
 static void list_shared_files(void) {
